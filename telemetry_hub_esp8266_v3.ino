@@ -60,35 +60,40 @@ unsigned long lastLog = 0;
 
 // ================= HTML principal ===================
 const char PAGE_HTML[] PROGMEM = R"HTML(
-<!doctype html><html><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Throttle + DHT + RPM + Corrente</title>
-<style>
-  :root{--ink:#eaeaea;--muted:#9aa4b2;--bg:#0b0c10;--card:#171a21;--panel:#0f1116;--line:#2a2f3a;--accent:#7aa2f7}
-  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  .wrap{max-width:1180px;margin:0 auto;padding:16px}
-  .card{background:var(--card);border-radius:16px;padding:16px}
-  h1{margin:0 0 12px;font-size:20px}
-  .badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 10px;margin-left:6px;color:var(--muted)}
-  .section{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;margin:10px 0}
-  .section h3{margin:0 0 10px 0;color:var(--muted);font-weight:600;font-size:14px;letter-spacing:.2px}
-  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .kv{display:flex;gap:6px;align-items:center}
-  .kv label{color:var(--muted)}
-  button,input{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
-  button:hover{background:#111722}
-  .btn-red{background:#3a0b11;border-color:#6c1d26}
-  .btn-blue{background:#0b113a;border-color:#1d286c}
-  .muted{color:var(--muted);font-size:12px}
-  .grid-metrics{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px;margin:8px 0}
-  .metric{background:var(--panel);border-radius:12px;padding:12px}
-  .metric h2{margin:0 0 6px;font-size:13px;color:var(--muted)}
-  .val{font-size:28px;font-weight:800}
-  .canvas-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .chart{background:var(--panel);border-radius:12px;padding:8px}
-  canvas{width:100%;height:260px;display:block}
-  @media (max-width:800px){ .canvas-grid{grid-template-columns:1fr} .grid-metrics{grid-template-columns:1fr} }
-</style></head><body>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Throttle + DHT + RPM + Corrente</title>
+  <style>
+    :root{--ink:#eaeaea;--muted:#9aa4b2;--bg:#0b0c10;--card:#171a21;--panel:#0f1116;--line:#2a2f3a;--accent:#7aa2f7}
+    html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    .wrap{max-width:1180px;margin:0 auto;padding:16px}
+    .card{background:var(--card);border-radius:16px;padding:16px}
+    h1{margin:0 0 12px;font-size:20px}
+    .badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 10px;margin-left:6px;color:var(--muted)}
+    .section{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;margin:10px 0}
+    .section h3{margin:0 0 10px 0;color:var(--muted);font-weight:600;font-size:14px;letter-spacing:.2px}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .kv{display:flex;gap:6px;align-items:center}
+    .kv label{color:var(--muted)}
+    button,input{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+    button:hover{background:#111722}
+    .btn-red{background:#3a0b11;border-color:#6c1d26}
+    .btn-blue{background:#0b113a;border-color:#1d286c}
+    .muted{color:var(--muted);font-size:12px}
+    .grid-metrics{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px;margin:8px 0}
+    .metric{background:var(--panel);border-radius:12px;padding:12px}
+    .metric h2{margin:0 0 6px;font-size:13px;color:var(--muted)}
+    .val{font-size:28px;font-weight:800}
+    .canvas-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .chart{background:var(--panel);border-radius:12px;padding:8px}
+    canvas{width:100%;height:260px;display:block}
+    @media (max-width:800px){ .canvas-grid{grid-template-columns:1fr} .grid-metrics{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
 <div class="wrap">
   <div class="card">
     <h1>Arduino Telemetry → ESP Web + MQTT
@@ -96,7 +101,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       <span id="ackBadge" class="badge">ack: —</span>
     </h1>
 
-    <!-- ==== Leituras rápidas ==== -->
+    <!-- Leituras rápidas -->
     <div class="grid-metrics">
       <div class="metric"><h2>Tensão (V)</h2><div class="val" id="v">--</div></div>
       <div class="metric"><h2>Aceleração (%)</h2><div class="val" id="p">--</div></div>
@@ -113,7 +118,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Grupo 1: Acelerador ==== -->
+    <!-- Grupo 1: Acelerador -->
     <div class="section">
       <h3>Acelerador (calibração e limites)</h3>
       <div class="controls">
@@ -127,7 +132,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Grupo 2: Roda & RPM ==== -->
+    <!-- Grupo 2: Roda & RPM -->
     <div class="section">
       <h3>Roda e sensor de RPM</h3>
       <div class="controls">
@@ -136,7 +141,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Grupo 3: Motor & Controles ==== -->
+    <!-- Grupo 3: Motor & Controles -->
     <div class="section">
       <h3>Motor e controles</h3>
       <div class="controls">
@@ -147,7 +152,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Grupo 4: Exibição ==== -->
+    <!-- Grupo 4: Exibição -->
     <div class="section">
       <h3>Exibição e atualização</h3>
       <div class="controls">
@@ -156,7 +161,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Grupo 5: CSV Logger (no ESP) ==== -->
+    <!-- Grupo 5: CSV Logger (no ESP) -->
     <div class="section">
       <h3>CSV Logger (no ESP)</h3>
       <div class="controls">
@@ -169,7 +174,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Gráficos ==== -->
+    <!-- Gráficos -->
     <div class="section">
       <h3>Gráficos</h3>
       <div class="canvas-grid">
@@ -185,7 +190,7 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- ==== Parâmetros de rampa/PWM do Arduino ==== -->
+    <!-- Parâmetros Arduino -->
     <div class="section">
       <h3>Parâmetros de rampa / PWM (Arduino)</h3>
       <div class="controls">
@@ -213,11 +218,8 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
   </div>
 </div>
 
-<!-- ===== JS (reutiliza os mesmos IDs/handlers do firmware) ===== -->
 <script>
-/* O JS é exatamente o mesmo da sua versão atual reorganizada:
-   – handlers /data, /set_* e desenho dos gráficos.
-   – mantive TODOS os mesmos IDs para compatibilidade. */
+/* --------- refs DOM --------- */
 const statusEl=document.getElementById('status');
 const vEl=document.getElementById('v'), pEl=document.getElementById('p'),
       tEl=document.getElementById('t'), hEl=document.getElementById('h'),
@@ -247,32 +249,42 @@ const maxpctIn=document.getElementById('maxpct');
 const logiv=document.getElementById('logiv');
 const logstatus=document.getElementById('logstatus');
 
+/* --------- estado UI --------- */
 let POLL_MS=1000, filledOnce=false;
 const MAXPTS=120;
 const buf = { V:[], P:[], T:[], H:[], R:[], S:[], IB:[], IM:[], IR:[] };
 
-function pushBuf(a,val){ a.push(val); if(a.length>MAXPTS) a.shift(); }
+/* --------- helpers: não sobrescrever inputs em edição --------- */
+function isIdle(el){ return document.activeElement !== el && !el.dataset.editing; }
+function setIfIdle(el, v){ if(isIdle(el)) el.value = v; }
+[minIn,maxIn,pollIn,maxpctIn,wheelIn,pprIn,logiv].forEach(el=>{
+  el.addEventListener('focus',()=>el.dataset.editing='1');
+  el.addEventListener('blur', ()=>delete el.dataset.editing);
+});
 
+/* --------- gráficos --------- */
+function pushBuf(a,val){ a.push(val); if(a.length>MAXPTS) a.shift(); }
 function drawSeries(canvasId, data, yLabel, minY=null, maxY=null){
   const cv=document.getElementById(canvasId), ctx=cv.getContext('2d');
   const W=cv.width=cv.clientWidth, H=cv.height=cv.clientHeight;
   const padL=42, padB=24, padT=10, padR=8;
   ctx.fillStyle="#0f1116"; ctx.fillRect(0,0,W,H);
-  const clean = data.filter(x=>x!=null && !Number.isNaN(x));
+  const clean=data.filter(x=>x!=null && !Number.isNaN(x));
   if(clean.length<2){ ctx.fillStyle="#aaa"; ctx.fillText("Sem dados", W/2-30, H/2); return; }
-  let dmin = (minY!==null)?minY:Math.min(...clean);
-  let dmax = (maxY!==null)?maxY:Math.max(...clean);
-  if (dmin===dmax){ dmin-=1; dmax+=1; }
+  let dmin=(minY!==null)?minY:Math.min(...clean);
+  let dmax=(maxY!==null)?maxY:Math.max(...clean);
+  if(dmin===dmax){ dmin-=1; dmax+=1; }
   ctx.strokeStyle="#222"; ctx.lineWidth=1;
   const ticks=5;
   for(let i=0;i<=ticks;i++){ const y=padT+(H-padT-padB)*i/ticks; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); }
   ctx.strokeStyle="#333"; ctx.strokeRect(padL,padT,W-padL-padR,H-padT-padB);
   ctx.fillStyle="#9aa4b2"; ctx.font="12px system-ui";
-  for(let i=0;i<=ticks;i++){ const val = dmax-(dmax-dmin)*i/ticks; const y=padT+(H-padT-padB)*i/ticks+4; ctx.fillText(val.toFixed((Math.abs(dmax-dmin)<5)?2:1), 4, y); }
-  ctx.fillText(yLabel, 4, padT+12);
+  for(let i=0;i<=ticks;i++){ const val=dmax-(dmax-dmin)*i/ticks; const y=padT+(H-padT-padB)*i/ticks+4; ctx.fillText(val.toFixed((Math.abs(dmax-dmin)<5)?2:1),4,y); }
+  ctx.fillText(yLabel,4,padT+12);
   ctx.strokeStyle="#7aa2f7"; ctx.lineWidth=2; ctx.beginPath();
   const n=data.length;
-  for(let i=0;i<n;i++){ const v=data[i]; if(v==null||Number.isNaN(v)) continue;
+  for(let i=0;i<n;i++){
+    const v=data[i]; if(v==null||Number.isNaN(v)) continue;
     const x=padL+(W-padL-padR)*i/(MAXPTS-1);
     const y=padT+(H-padT-padB)*(1-(v-dmin)/(dmax-dmin));
     if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
@@ -280,10 +292,10 @@ function drawSeries(canvasId, data, yLabel, minY=null, maxY=null){
   ctx.stroke();
 }
 
+/* --------- loop principal --------- */
 async function tick(){
   try{
-    const r=await fetch('/data',{cache:'no-store'});
-    if(!r.ok) throw new Error('HTTP '+r.status);
+    const r=await fetch('/data',{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
 
     const volts=Number(d.volts);
@@ -292,11 +304,9 @@ async function tick(){
     const humi=(d.humi==null)?null:Number(d.humi);
     const rpm=(d.rpm==null)?null:Number(d.rpm);
     const spd=(d.speed_kmh==null)?null:Number(d.speed_kmh);
-
     const ib =(d.current_bat_a==null)?null:Number(d.current_bat_a);
     const im =(d.current_mot_a==null)?null:Number(d.current_mot_a);
-    const ratio = (ib!=null && im!=null && !isNaN(ib) && !isNaN(im) && Math.abs(im)>1e-6) ? (ib/im) : null;
-
+    const ratio=(ib!=null && im!=null && !isNaN(ib) && !isNaN(im) && Math.abs(im)>1e-6)?(ib/im):null;
     const motor_on = d.override ? 0 : 1;
 
     if(!Number.isNaN(volts)) vEl.textContent=volts.toFixed(3);
@@ -310,69 +320,111 @@ async function tick(){
     imEl.textContent=(im==null||Number.isNaN(im))?'--':im.toFixed(2);
     irEl.textContent=(ratio==null)?'--':ratio.toFixed(2);
 
-    if(typeof d.min==='number'){ minEl.textContent=d.min.toFixed(3); minIn.value=d.min.toFixed(3); }
-    if(typeof d.max==='number'){ maxEl.textContent=d.max.toFixed(3); maxIn.value=d.max.toFixed(3); }
-    if(typeof d.poll_ms==='number'){ POLL_MS=d.poll_ms; pollIn.value=POLL_MS; }
-    if(typeof d.max_pct==='number'){ maxpctIn.value=d.max_pct; }
+    if(typeof d.min==='number'){ minEl.textContent=d.min.toFixed(3); setIfIdle(minIn,d.min.toFixed(3)); }
+    if(typeof d.max==='number'){ maxEl.textContent=d.max.toFixed(3); setIfIdle(maxIn,d.max.toFixed(3)); }
+    if(typeof d.poll_ms==='number'){ POLL_MS=d.poll_ms; setIfIdle(pollIn,POLL_MS); }
+    if(typeof d.max_pct==='number'){ setIfIdle(maxpctIn,d.max_pct); }
 
-    if (typeof d.log_enabled!=='undefined'){
-      logstatus.textContent = (d.log_enabled? 'ON':'OFF') + ' • ' + (d.log_size||0) + ' bytes @ ' + (d.log_iv_ms||0)+' ms';
-      if (d.log_iv_ms) logiv.value = d.log_iv_ms;
+    if(typeof d.log_enabled!=='undefined'){
+      const sz=d.log_size||0, iv=d.log_iv_ms||0;
+      logstatus.textContent=(d.log_enabled?'ON':'OFF')+' • '+sz+' bytes @ '+iv+' ms';
+      if(d.log_iv_ms) setIfIdle(logiv,d.log_iv_ms);
+    }
+
+    if(!filledOnce){
+      if(typeof d.wheel_cm==='number') setIfIdle(wheelIn,d.wheel_cm.toFixed(1));
+      if(typeof d.ppr==='number') setIfIdle(pprIn,String(d.ppr));
+      filledOnce=true;
     }
 
     pushBuf(buf.V, Number.isNaN(volts)?null:volts);
     pushBuf(buf.P, Number.isNaN(pct)?null:pct);
-    pushBuf(buf.T, temp);
-    pushBuf(buf.H, humi);
-    pushBuf(buf.R, rpm);
-    pushBuf(buf.S, spd);
-    pushBuf(buf.IB, ib);
-    pushBuf(buf.IM, im);
-    pushBuf(buf.IR, ratio);
+    pushBuf(buf.T, temp); pushBuf(buf.H, humi);
+    pushBuf(buf.R, rpm);  pushBuf(buf.S, spd);
+    pushBuf(buf.IB, ib);  pushBuf(buf.IM, im); pushBuf(buf.IR, ratio);
 
-    drawSeries('cvV',  buf.V, 'V');
-    drawSeries('cvP',  buf.P, '%', 0, 100);
-    drawSeries('cvT',  buf.T, '°C');
-    drawSeries('cvH',  buf.H, '%', 0, 100);
-    drawSeries('cvR',  buf.R, 'RPM');
-    drawSeries('cvS',  buf.S, 'km/h');
-    drawSeries('cvIB', buf.IB, 'A');
-    drawSeries('cvIM', buf.IM, 'A');
-    drawSeries('cvIR', buf.IR, 'Ib/Im');
+    drawSeries('cvV',buf.V,'V');
+    drawSeries('cvP',buf.P,'%',0,100);
+    drawSeries('cvT',buf.T,'°C');
+    drawSeries('cvH',buf.H,'%',0,100);
+    drawSeries('cvR',buf.R,'RPM');
+    drawSeries('cvS',buf.S,'km/h');
+    drawSeries('cvIB',buf.IB,'A');
+    drawSeries('cvIM',buf.IM,'A');
+    drawSeries('cvIR',buf.IR,'Ib/Im');
 
     document.getElementById('motorBadge').textContent = motor_on ? 'motor: ON' : 'motor: OFF';
-    const ack = (d.ack||'').trim(); ackBadge.textContent = 'ack: ' + (ack? ack : '—');
+    const ack=(d.ack||'').trim(); document.getElementById('ackBadge').textContent='ack: '+(ack?ack:'—');
     statusEl.textContent='status: ok';
   }catch(e){ statusEl.textContent='status: ERRO '+e.message; }
   setTimeout(tick, POLL_MS);
 }
 tick();
 
-// Endpoints
+/* --------- endpoints --------- */
 document.getElementById('setMin').onclick=async()=>{ try{ await fetch('/min_now'); }catch(_){ } };
 document.getElementById('setMax').onclick=async()=>{ try{ await fetch('/max_now'); }catch(_){ } };
 document.getElementById('resetMM').onclick=async()=>{ try{ await fetch('/defaults'); }catch(_){ } };
-document.getElementById('applyMin').onclick=async()=>{ const v=parseFloat(minIn.value||"0"); try{ await fetch('/set_min?v='+encodeURIComponent(v.toFixed(3))); }catch(_){} };
-document.getElementById('applyMax').onclick=async()=>{ const v=parseFloat(maxIn.value||"0"); try{ await fetch('/set_max?v='+encodeURIComponent(v.toFixed(3))); }catch(_){} };
 
-document.getElementById('applyWheel').onclick=async()=>{ const cm=parseFloat(wheelIn.value||"50.8"); try{ await fetch('/set_wheel?cm='+encodeURIComponent(cm)); }catch(_){} };
-document.getElementById('applyPpr').onclick=async()=>{ const n=parseInt(pprIn.value||"1",10); try{ await fetch('/set_ppr?n='+encodeURIComponent(n)); }catch(_){} };
+document.getElementById('applyMin').onclick=async()=>{
+  const v=parseFloat(minIn.value||"0");
+  try{ await fetch('/set_min?v='+encodeURIComponent(v.toFixed(3))); }catch(_){}
+};
+document.getElementById('applyMax').onclick=async()=>{
+  const v=parseFloat(maxIn.value||"0");
+  try{ await fetch('/set_max?v='+encodeURIComponent(v.toFixed(3))); }catch(_){}
+};
+
+document.getElementById('applyWheel').onclick=async()=>{
+  const cm=parseFloat(wheelIn.value||"50.8");
+  try{ await fetch('/set_wheel?cm='+encodeURIComponent(cm)); }catch(_){}
+};
+document.getElementById('applyPpr').onclick=async()=>{
+  const n=parseInt(pprIn.value||"1",10);
+  try{ await fetch('/set_ppr?n='+encodeURIComponent(n)); }catch(_){}
+};
 
 stopBtn.onclick=async()=>{ try{ await fetch('/stop'); }catch(_){ } };
 startBtn.onclick=async()=>{ try{ await fetch('/start'); }catch(_){ } };
-applyHold.onclick=async()=>{ const n=Math.max(0,Math.min(100,parseInt(holdIn.value||"0",10))); try{ await fetch('/hold_pct?x='+encodeURIComponent(n)); }catch(_){} };
+applyHold.onclick=async()=>{
+  const n=Math.max(0,Math.min(100,parseInt(holdIn.value||"0",10)));
+  try{ await fetch('/hold_pct?x='+encodeURIComponent(n)); }catch(_){}
+};
 
-document.getElementById('applyPoll').onclick=async()=>{ const ms=parseInt(pollIn.value||"1000",10); try{ await fetch('/set_pollms?ms='+encodeURIComponent(ms)); }catch(_){} };
-document.getElementById('applyMaxPct').onclick=async()=>{ const x=Math.max(1,Math.min(100,parseInt(maxpctIn.value||"100",10))); try{ await fetch('/set_maxpct?x='+encodeURIComponent(x)); }catch(_){} };
+document.getElementById('applyPoll').onclick=async()=>{
+  const ms=parseInt(pollIn.value||"1000",10);
+  try{ await fetch('/set_pollms?ms='+encodeURIComponent(ms)); }catch(_){}
+};
+document.getElementById('applyMaxPct').onclick=async()=>{
+  const x=Math.max(1,Math.min(100,parseInt(maxpctIn.value||"100",10)));
+  try{ await fetch('/set_maxpct?x='+encodeURIComponent(x)); }catch(_){}
+};
 
-document.getElementById('applyPwmf').onclick=async()=>{ const hz=Math.max(100,Math.min(8000,parseInt(pwmf.value||"1000",10))); try{ await fetch('/set_pwmf?hz='+hz); }catch(_){} };
-document.getElementById('applyStartMin').onclick=async()=>{ const x=Math.max(0,Math.min(40,parseInt(startmin.value||"8",10))); try{ await fetch('/set_startmin?x='+x); }catch(_){} };
-document.getElementById('applyRapid').onclick=async()=>{ const ms=Math.max(50,Math.min(1500,parseInt(rapidms.value||"250",10))); const up=Math.max(10,Math.min(400,parseInt(rapup.value||"150",10))); try{ await fetch('/set_rapid?ms='+ms+'&up='+up); }catch(_){} };
-document.getElementById('applySlew').onclick=async()=>{ const up=Math.max(5,Math.min(200,parseInt(slewup.value||"40",10))); const dn=Math.max(5,Math.min(300,parseInt(slewdn.value||"60",10))); try{ await fetch('/set_slew?up='+up+'&down='+dn); }catch(_){} };
-document.getElementById('applyZero').onclick=async()=>{ const ms=Math.max(50,Math.min(2000,parseInt(zeroms.value||"600",10))); try{ await fetch('/set_zeroto?ms='+ms); }catch(_){} };
+document.getElementById('applyPwmf').onclick=async()=>{
+  const hz=Math.max(100,Math.min(8000,parseInt(pwmf.value||"1000",10)));
+  try{ await fetch('/set_pwmf?hz='+hz); }catch(_){}
+};
+document.getElementById('applyStartMin').onclick=async()=>{
+  const x=Math.max(0,Math.min(40,parseInt(startmin.value||"8",10)));
+  try{ await fetch('/set_startmin?x='+x); }catch(_){}
+};
+document.getElementById('applyRapid').onclick=async()=>{
+  const ms=Math.max(50,Math.min(1500,parseInt(rapidms.value||"250",10)));
+  const up=Math.max(10,Math.min(400,parseInt(rapup.value||"150",10)));
+  try{ await fetch('/set_rapid?ms='+ms+'&up='+up); }catch(_){}
+};
+document.getElementById('applySlew').onclick=async()=>{
+  const up=Math.max(5,Math.min(200,parseInt(slewup.value||"40",10)));
+  const dn=Math.max(5,Math.min(300,parseInt(slewdn.value||"60",10)));
+  try{ await fetch('/set_slew?up='+up+'&down='+dn); }catch(_){}
+};
+document.getElementById('applyZero').onclick=async()=>{
+  const ms=Math.max(50,Math.min(2000,parseInt(zeroms.value||"600",10)));
+  try{ await fetch('/set_zeroto?ms='+ms); }catch(_){}
+};
 </script>
-</body></html>
-)HTML";
+</body>
+</html>)HTML";
 
 
 // ---------------- /speedo (igual com pequenos ajustes) ----------------
