@@ -6,12 +6,20 @@ Coleção de firmwares Arduino/ESP8266 utilizados nos protótipos de telemetria 
 
 | Arquivo | Plataforma | Principais recursos |
 |---------|------------|---------------------|
+| `motor_controller_uno_v2.ino` | Arduino Uno/Nano | Controlador PWM no pino D9 com rampas configuráveis, leitura de acelerador, RPM, correntes (Ibat/Imot) e DHT22 para telemetria. Suporta EEPROM para persistência de parâmetros. |
+| `telemetry_hub_esp8266_v3.ino` | ESP8266 (NodeMCU) | Hub de telemetria completo com UI web, ponte serial, MQTT (pub/sub), OTA, mDNS e registro CSV em LittleFS. Integra sensores apenas para monitoramento, sem afetar o controle. |
+| `motor_controller_mega_v2.ino` | Arduino Mega 2560 | Versão para MEGA com PWM no pino D11 (Timer1 OC1A), leitura de acelerador em A0, RPM via PCINT em A8, correntes (Ibat/Imot), DHT22, cálculo de velocidade (wheel/PPR configuráveis) e telemetria em formato chave:valor. Inclui rampas avançadas (soft-start, rampa S, teto de %), modo HOLD e persistência completa de parâmetros na EEPROM.|
+| `motor_controller_mega_v3.ino`  | Arduino Mega 2560 | Evolução do controlador do MEGA acrescentando LOG em microSD via SPI (CS em D10), que cria arquivos `LOGxxx.CSV` e grava periodicamente ms, tensão do acelerador, % de pedal, temperatura, umidade, RPM, velocidade em km/h, correntes Ibat/Imot e duty atual/alvo para análise offline. |
+
+
+### Arquivos não mais usados
+
+| Arquivo | Plataforma | Principais recursos |
+|---------|------------|---------------------|
 | `medidor_aceleracao_online.ino` | ESP8266 (Wemos D1 mini) | Lê o acelerador (Hall, 3 fios) no pino A0, disponibilizando a leitura pela porta serial e por uma página web/JSON. Utiliza WiFiManager para configuração de rede. |
 | `medidor_aceleracao_temperatura_online.ino` | ESP8266 (Wemos D1 mini) | Expande o medidor adicionando sensor DHT (temperatura/umidade) no pino D4, interface web com gráfico e endpoint `/data` em JSON. |
 | `medidor_aceleracao_temperatura_online_pwm.ino` | ESP8266 (Wemos D1 mini) | Adiciona saída PWM no pino D6 para acionamento de motor via MOSFET (ex.: IRLZ44N), mantendo leitura do acelerador e DHT. |
 | `medidor_aceleracao_temperatura_online_pwm_rpm.ino` | ESP8266 (Wemos D1 mini) | Inclui medição de RPM com sensor Hall (D5), persistência de configurações em LittleFS, controles START/STOP via HTTP e visualização detalhada de telemetria (Volts, %, Temp, Humi, RPM, Speed). |
-| `motor_controller_uno_v2.ino` | Arduino Uno/Nano | Controlador PWM no pino D9 com rampas configuráveis, leitura de acelerador, RPM, correntes (Ibat/Imot) e DHT22 para telemetria. Suporta EEPROM para persistência de parâmetros. |
-| `telemetry_hub_esp8266_v3.ino` | ESP8266 (NodeMCU) | Hub de telemetria completo com UI web, ponte serial, MQTT (pub/sub), OTA, mDNS e registro CSV em LittleFS. Integra sensores apenas para monitoramento, sem afetar o controle. |
 
 ## Pré-requisitos
 
@@ -27,6 +35,51 @@ Coleção de firmwares Arduino/ESP8266 utilizados nos protótipos de telemetria 
   - `ArduinoOTA`, `ESP8266mDNS`
 
 Cada sketch possui comentários indicando bibliotecas adicionais específicas (ex.: `time.h` para NTP no hub de telemetria). Consulte a seção superior de cada arquivo para conferir dependências e ajustes finos de hardware.
+
+Segue tudo lapidado em Markdown, prontinho para encaixar no README do E-Wolf v3.
+
+---
+
+## Pinagem resumida – E-Wolf Telemetria & Controle
+
+| Função / Componente                   | Tipo / Módulo             | **Arduino Mega 2560**           | **ESP8266 (NodeMCU / Wemos D1 mini)** | Observações                           |
+| ------------------------------------- | ------------------------- | ------------------------------- | ------------------------------------- | ------------------------------------- |
+| Acelerador (Hall)                     | Analógico (0–5 V, 3 fios) | A0                              | —                                     | Leitura analógica (Mega controla PWM) |
+| Sensor de RPM (Hall)                  | Digital (open collector)  | A8                              | —                                     | Interrupção via PCINT no Mega         |
+| Sensor de corrente – bateria (ACS712) | Analógico                 | A2                              | —                                     | Leitura direta do VOUT                |
+| Sensor de corrente – motor (ACS712)   | Analógico                 | A3                              | —                                     | Opcional                              |
+| Sensor DHT22                          | Digital                   | D4                              | D4 (GPIO2)                            | Pode existir em ambos os módulos      |
+| Saída PWM do motor                    | Digital PWM               | D11 (OC1A)                      | —                                     | Saída principal de potência           |
+| Módulo microSD (SPI)                  | SPI                       | CS=10, MOSI=51, MISO=50, SCK=52 | —                                     | Logs CSV locais                       |
+| Serial de telemetria                  | UART                      | TX1=18, RX1=19                  | RX=D7, TX=D8                          | Mega ↔ ESP8266 @ 115200 baud          |
+| Wi-Fi / MQTT / Web UI                 | —                         | —                               | Integrado                             | Hub de telemetria e UI                |
+| Alimentação                           | —                         | 5 V / GND                       | VIN / GND                             | Terra comum obrigatório               |
+| EEPROM interna                        | Persistência              | Interna                         | —                                     | Armazena rampas e limites             |
+| LittleFS                              | Armazenamento             | —                               | Interna                               | Armazena UI e logs do hub             |
+
+---
+
+## Ligação típica entre Mega e ESP8266
+
+| Ligação   | **Mega 2560** | **ESP8266** | Descrição                    |
+| --------- | ------------- | ----------- | ---------------------------- |
+| TX1 → RX  | D18 (TX1)     | D7 (RX)     | Mega envia telemetria        |
+| RX1 ← TX  | D19 (RX1)     | D8 (TX)     | ESP envia comandos           |
+| GND ↔ GND | —             | —           | Referência comum obrigatória |
+| 5 V → VIN | —             | VIN         | Alimentação do ESP8266       |
+
+---
+
+## 🧩 Fluxo geral do sistema
+
+1. O **Mega 2560** lê acelerador, RPM, correntes e DHT22, controla o PWM e grava logs no microSD.
+2. O **ESP8266** recebe telemetria via Serial, exibe UI Web, publica no MQTT e oferece endpoints HTTP.
+3. Os dois módulos podem funcionar independentes, mas juntos formam o **E-Wolf v3 completo**: controle + telemetria.
+
+---
+
+Quer que eu adicione uma versão alternativa mais compacta ou um diagrama ASCII para ajudar na visualização?
+
 
 ## Como compilar e carregar
 
@@ -50,6 +103,7 @@ Os sketches baseados em ESP8266 utilizam **WiFiManager**. Caso não haja credenc
   - `/start` para iniciar o motor com o duty atual.
   - `/stop?duty=` para definir duty cycle (0–100% ou valor bruto 0–1023).
 - **MQTT** (hub ESP8266): publica em `pb/telemetry/json`, assina `pb/cmd/motor` e define LWT em `pb/status`.
+
 
 ## Referência de comandos — Arduino + ESP8266
 
@@ -244,8 +298,4 @@ Alguns sketches usam **LittleFS** ou **EEPROM** para salvar configurações como
 1. Crie um fork deste repositório.
 2. Trabalhe em uma branch dedicada e documente suas alterações.
 3. Envie um Pull Request descrevendo claramente as funcionalidades adicionadas ou correções.
-
-## Licença
-
-Defina aqui a licença apropriada para o projeto (por exemplo, MIT, GPL, etc.). Caso ainda não exista uma licença formal, considere adicioná-la para esclarecer direitos de uso e distribuição.
 
