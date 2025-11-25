@@ -10,6 +10,12 @@ Coleção de firmwares Arduino/ESP8266 utilizados nos protótipos de telemetria 
 | `telemetry_hub_esp8266_v3.ino` | ESP8266 (NodeMCU) | Hub de telemetria completo com UI web, ponte serial, MQTT (pub/sub), OTA, mDNS e registro CSV em LittleFS. Integra sensores apenas para monitoramento, sem afetar o controle. |
 | `motor_controller_mega_v2.ino` | Arduino Mega 2560 | Versão para MEGA com PWM no pino D11 (Timer1 OC1A), leitura de acelerador em A0, RPM via PCINT em A8, correntes (Ibat/Imot), DHT22, cálculo de velocidade (wheel/PPR configuráveis) e telemetria em formato chave:valor. Inclui rampas avançadas (soft-start, rampa S, teto de %), modo HOLD e persistência completa de parâmetros na EEPROM.|
 | `motor_controller_mega_v3.ino`  | Arduino Mega 2560 | Evolução do controlador do MEGA acrescentando LOG em microSD via SPI (CS em D10), que cria arquivos `LOGxxx.CSV` e grava periodicamente ms, tensão do acelerador, % de pedal, temperatura, umidade, RPM, velocidade em km/h, correntes Ibat/Imot e duty atual/alvo para análise offline. |
+| `telemetry_hub_esp32c3_v4.ino` | ESP32-C3 SuperMini | Versão com UI Web completa (dashboard + speedo), MQTT pub/sub, OTA, mDNS, logger CSV em LittleFS e BLE UART para telemetria + comandos. Interpreta o protocolo K:V vindo do MEGA e expõe `/data`, `/log/*`, calibração via HTTP, e velocidade em tempo real.                                    |
+| `telemetry_hub_esp32c3_v5.ino` | ESP32-C3 SuperMini | Versão mais enxuta e moderna SEM Web UI, focada em MQTT + BLE + Logging. Inclui controle remoto por BLE/MQTT, override de aceleração, seleção automática da origem do comando (LOCAL/BLE/MQTT), CSV rotativo, OTA, mDNS, e telemetria estendida. Ideal para dashboards externos e apps móveis.  |
+| Arquivo                             | Plataforma                                     | Principais recursos
+| **`telemetry_dashboard_mqtt.html`** | **Dashboard Web (qualquer navegador moderno)** | Interface avançada de telemetria em **tempo real via MQTT/WebSocket**, sem depender de ESP rodando página própria. Exibe tensão, pedal (%), temperatura, umidade, RPM, velocidade, corrente da bateria/motor e razão Ib/I. Inclui gráficos deslizantes (~120 amostras), controle remoto de aceleração (override), STOP/START, envio de configurações (max_pct, log, etc.) e modal para ajustar host/porta/path TLS/WebSocket do broker. Totalmente responsivo, elegante e independente — ótimo para uso em desktop, tablet ou celular.  |
+
+---
 
 
 ### Arquivos não mais usados

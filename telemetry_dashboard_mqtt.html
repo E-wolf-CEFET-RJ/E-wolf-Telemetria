@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>E-Wolf Telemetry Dashboard (MQTT)</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --ink:#eaeaea;
+    --muted:#9aa4b2;
+    --bg:#05060a;
+    --card:#141622;
+    --panel:#0c0e16;
+    --line:#262b3b;
+    --accent:#7aa2f7;
+    --accent2:#f7768e;
+  }
+  *{box-sizing:border-box}
+  html,body{
+    margin:0;
+    background:radial-gradient(circle at top,#101423,#05060a);
+    color:var(--ink);
+    font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:12px}
+  .card{
+    background:rgba(10,12,20,.94);
+    border-radius:18px;
+    padding:14px;
+    border:1px solid rgba(120,140,200,.22);
+    box-shadow:0 18px 60px rgba(0,0,0,.65);
+    backdrop-filter:blur(12px);
+  }
+  h1{margin:0 0 8px;font-size:20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    padding:4px 10px;
+    font-size:11px;
+    color:var(--muted);
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:#555}
+  .dot.ok{background:#4ade80}
+  .dot.err{background:#f97373}
+
+  .section{
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:14px;
+    padding:10px;
+    margin:8px 0;
+  }
+  .section h3{
+    margin:0 0 8px;
+    color:var(--muted);
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:.14em;
+  }
+
+  .grid-metrics{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(160px,1fr));
+    gap:8px;
+  }
+  .metric{
+    background:linear-gradient(145deg,#0d101a,#151727);
+    border-radius:12px;
+    padding:10px;
+    border:1px solid #1c2030;
+  }
+  .metric h2{
+    margin:0 0 4px;
+    font-size:12px;
+    color:var(--muted);
+    font-weight:500;
+  }
+  .val{font-size:24px;font-weight:800}
+  .unit{font-size:12px;color:var(--muted);margin-left:4px}
+
+  .muted{color:var(--muted);font-size:11px}
+
+  .controls-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+  }
+  button,input,select{
+    font-family:inherit;
+    font-size:13px;
+  }
+  button{
+    border-radius:999px;
+    border:1px solid var(--line);
+    padding:6px 12px;
+    background:#0b0e18;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  button:hover{background:#141827}
+  .btn-red{
+    background:#3b1018;
+    border-color:#f97373;
+  }
+  .btn-red:hover{background:#581321}
+  .btn-green{
+    background:#10351c;
+    border-color:#4ade80;
+  }
+  .btn-green:hover{background:#14532d}
+  .btn-ghost{
+    background:#0b0e18;
+    border-color:#293043;
+    color:var(--muted);
+  }
+
+  input[type=number],input[type=text]{
+    background:#060814;
+    border-radius:999px;
+    border:1px solid #23273a;
+    padding:5px 9px;
+    color:var(--ink);
+    min-width:60px;
+  }
+  input[type=checkbox]{transform:scale(1.1);margin-left:4px}
+
+  .slider-row{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    margin-top:6px;
+  }
+  input[type=range]{
+    width:100%;
+    accent-color:var(--accent);
+  }
+
+  .canvas-grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:8px;
+  }
+  .chart{
+    background:#0b0f18;
+    border-radius:12px;
+    padding:6px;
+    border:1px solid #222738;
+  }
+  .chart h4{
+    margin:0 0 4px;
+    font-size:12px;
+    color:var(--muted);
+  }
+  canvas{
+    width:100%;
+    height:180px;
+    display:block;
+  }
+
+  @media (max-width:900px){
+    .grid-metrics{grid-template-columns:repeat(2,minmax(140px,1fr))}
+  }
+  @media (max-width:640px){
+    .grid-metrics{grid-template-columns:1fr}
+    .canvas-grid{grid-template-columns:1fr}
+  }
+
+  /* Modal */
+  .modal{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.6);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    z-index:10;
+  }
+  .card-modal{
+    background:#060814;
+    border-radius:16px;
+    border:1px solid #262b3b;
+    padding:14px;
+    width:min(520px,94vw);
+  }
+  .row{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:space-between;
+    gap:8px;
+    margin:6px 0;
+    align-items:center;
+  }
+  .row label{font-size:12px;color:var(--muted)}
+  .row input[type=text],.row input[type=number]{
+    border-radius:8px;
+    width:240px;
+    max-width:100%;
+  }
+  .cfg-caption{font-size:11px;color:var(--muted);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>
+      E-Wolf Telemetry MQTT
+      <span id="mqttBadge" class="badge">
+        <span class="dot" id="mqttDot"></span>
+        <span id="mqttText">MQTT: desconectado</span>
+      </span>
+      <span class="badge">
+        fonte: <span id="srcText" style="font-weight:600;margin-left:4px">?</span>
+      </span>
+      <span class="badge">
+        override: <span id="ovrText" style="font-weight:600;margin-left:4px">?</span>
+      </span>
+    </h1>
+
+    <!-- Métricas principais -->
+    <div class="grid-metrics">
+      <div class="metric"><h2>Tensão da bateria</h2><div class="val"><span id="v">--</span><span class="unit">V</span></div></div>
+      <div class="metric"><h2>Aceleração</h2><div class="val"><span id="p">--</span><span class="unit">%</span></div></div>
+      <div class="metric"><h2>Temperatura</h2><div class="val"><span id="t">--</span><span class="unit">°C</span></div></div>
+      <div class="metric"><h2>Umidade</h2><div class="val"><span id="h">--</span><span class="unit">%</span></div></div>
+      <div class="metric"><h2>RPM</h2><div class="val"><span id="rpm">--</span><span class="unit">rpm</span></div></div>
+      <div class="metric"><h2>Velocidade</h2><div class="val"><span id="spd">--</span><span class="unit">km/h</span></div></div>
+      <div class="metric"><h2>Corrente bateria</h2><div class="val"><span id="ibat">--</span><span class="unit">A</span></div></div>
+      <div class="metric"><h2>Corrente motor</h2><div class="val"><span id="imot">--</span><span class="unit">A</span></div></div>
+      <div class="metric">
+        <h2>Relação Ibatt / Imot</h2>
+        <div class="val"><span id="iratio">--</span></div>
+        <div class="muted">Ajuda a enxergar perdas / eficiência do conjunto.</div>
+      </div>
+    </div>
+
+    <!-- Motor + Override -->
+    <div class="section">
+      <h3>Controle de motor e override</h3>
+      <div class="controls-row" style="margin-bottom:6px">
+        <button id="btnStop" class="btn-red">STOP</button>
+        <button id="btnStart" class="btn-green">START</button>
+        <button id="btnCfg" class="btn-ghost" style="margin-left:auto">Configurar MQTT</button>
+      </div>
+      <div class="controls-row">
+        <span class="muted" id="statusLine">Aguardando conexão MQTT…</span>
+      </div>
+
+      <div class="slider-row">
+        <div class="controls-row">
+          <label class="muted">Override via MQTT (0–100%)</label>
+          <span class="muted">valor: <b id="thVal">0%</b></span>
+        </div>
+        <input type="range" id="throttleSlider" min="0" max="100" value="0">
+        <div class="controls-row">
+          <button id="btnAuto" class="btn-ghost">Modo AUTO (controle local)</button>
+          <span class="muted">Move o slider → <b>mode: override</b>. Botão AUTO → <b>mode: auto</b>.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config remota -->
+    <div class="section">
+      <h3>Configuração remota (pb/cmd/config)</h3>
+      <div class="controls-row">
+        <label class="muted">Teto de aceleração (max_pct):</label>
+        <input id="maxPctIn" type="number" min="0" max="100" step="1" placeholder="100">
+        <label class="muted">Log CSV:</label>
+        <label class="muted">habilitar<input id="logChk" type="checkbox"></label>
+        <button id="btnSendCfg" class="btn-ghost">Enviar config</button>
+      </div>
+      <div class="cfg-caption">
+        Envia JSON minimalista, ex:
+        <code>{"max_pct": 70, "log": true}</code> no tópico <code>pb/cmd/config</code>.
+      </div>
+    </div>
+
+    <!-- Gráficos -->
+    <div class="section">
+      <h3>Gráficos (janela deslizante ~120 pontos)</h3>
+      <div class="canvas-grid">
+        <div class="chart"><h4>Volts</h4><canvas id="cvV"></canvas></div>
+        <div class="chart"><h4>Aceleração (%)</h4><canvas id="cvP"></canvas></div>
+        <div class="chart"><h4>Velocidade (km/h)</h4><canvas id="cvS"></canvas></div>
+        <div class="chart"><h4>Ibateria (A)</h4><canvas id="cvIB"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de configuração MQTT -->
+<div id="modal" class="modal">
+  <div class="card-modal">
+    <h3 style="margin-top:0">Configuração MQTT (WebSocket)</h3>
+    <div class="row">
+      <label>Host:</label>
+      <input id="hostIn" type="text" placeholder="broker.mqtt-dashboard.com">
+    </div>
+    <div class="row">
+      <label>Porta WebSocket:</label>
+      <input id="portIn" type="number" min="1" max="65535" step="1" placeholder="8000">
+    </div>
+    <div class="row">
+      <label>Usar TLS (wss://):</label>
+      <div>
+        <input id="tlsIn" type="checkbox">
+        <span class="muted">Se marcado, usa <b>wss://</b> em vez de <b>ws://</b>.</span>
+      </div>
+    </div>
+    <div class="row">
+      <label>WS path:</label>
+      <input id="pathIn" type="text" placeholder="/mqtt">
+    </div>
+    <div class="row">
+      <label>Client ID base:</label>
+      <input id="cidIn" type="text" placeholder="ewolf-dashboard">
+    </div>
+    <div class="row">
+      <label>Tópico telemetria JSON:</label>
+      <input id="topicTlmIn" type="text" placeholder="pb/telemetry/json">
+    </div>
+    <div class="row">
+      <label>Tópico comando motor:</label>
+      <input id="topicMotorIn" type="text" placeholder="pb/cmd/motor">
+    </div>
+    <div class="row">
+      <label>Tópico throttle:</label>
+      <input id="topicThrIn" type="text" placeholder="pb/cmd/throttle">
+    </div>
+    <div class="row">
+      <label>Tópico config:</label>
+      <input id="topicCfgIn" type="text" placeholder="pb/cmd/config">
+    </div>
+    <div class="row">
+      <label>Intervalo mínimo update (ms):</label>
+      <input id="ivalIn" type="number" min="100" max="2000" step="50" value="250">
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px">
+      <button id="btnCloseModal" class="btn-ghost">Fechar</button>
+      <button id="btnSaveModal" class="btn-green">Salvar e reconectar</button>
+    </div>
+    <div class="cfg-caption">
+      Você pode passar parâmetros pela URL, ex:
+      <code>?host=broker.mqtt-dashboard.com&port=8000&tls=0&path=/mqtt</code>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- Config padrão ---------- */
+let cfg = {
+  host: 'broker.mqtt-dashboard.com',
+  port: 8000,        // WS sem TLS
+  tls: false,        // se true => wss
+  path: '/mqtt',
+  cid: 'ewolf-dashboard',
+  topicTlm: 'pb/telemetry/json',
+  topicMotor: 'pb/cmd/motor',
+  topicThr: 'pb/cmd/throttle',
+  topicCfg: 'pb/cmd/config',
+  IV: 250
+};
+
+(function applyQueryString(){
+  const qs = new URLSearchParams(location.search);
+  const get = (k, d)=> qs.has(k) ? qs.get(k) : d;
+  if (qs.has('host'))      cfg.host      = get('host', cfg.host);
+  if (qs.has('port'))      cfg.port      = Number(get('port', cfg.port));
+  if (qs.has('tls'))       cfg.tls       = (get('tls','0') === '1');
+  if (qs.has('path'))      cfg.path      = get('path', cfg.path);
+  if (qs.has('cid'))       cfg.cid       = get('cid', cfg.cid);
+  if (qs.has('topic'))     cfg.topicTlm  = get('topic', cfg.topicTlm);
+  if (qs.has('topic_tlm')) cfg.topicTlm  = get('topic_tlm', cfg.topicTlm);
+  if (qs.has('topic_motor')) cfg.topicMotor = get('topic_motor', cfg.topicMotor);
+  if (qs.has('topic_thr'))   cfg.topicThr   = get('topic_thr', cfg.topicThr);
+  if (qs.has('topic_cfg'))   cfg.topicCfg   = get('topic_cfg', cfg.topicCfg);
+  if (qs.has('ival'))      cfg.IV        = Number(get('ival', cfg.IV));
+})();
+
+/* ---------- DOM refs ---------- */
+const mqttBadge = document.getElementById('mqttBadge');
+const mqttDot   = document.getElementById('mqttDot');
+const mqttText  = document.getElementById('mqttText');
+const srcText   = document.getElementById('srcText');
+const ovrText   = document.getElementById('ovrText');
+
+const vEl=document.getElementById('v');
+const pEl=document.getElementById('p');
+const tEl=document.getElementById('t');
+const hEl=document.getElementById('h');
+const rpmEl=document.getElementById('rpm');
+const spdEl=document.getElementById('spd');
+const ibEl=document.getElementById('ibat');
+const imEl=document.getElementById('imot');
+const irEl=document.getElementById('iratio');
+
+const statusLine=document.getElementById('statusLine');
+const btnStop=document.getElementById('btnStop');
+const btnStart=document.getElementById('btnStart');
+const btnCfg=document.getElementById('btnCfg');
+
+const slider=document.getElementById('throttleSlider');
+const thVal=document.getElementById('thVal');
+const btnAuto=document.getElementById('btnAuto');
+
+const maxPctIn=document.getElementById('maxPctIn');
+const logChk=document.getElementById('logChk');
+const btnSendCfg=document.getElementById('btnSendCfg');
+
+/* Modal */
+const modal=document.getElementById('modal');
+const hostIn=document.getElementById('hostIn');
+const portIn=document.getElementById('portIn');
+const tlsIn=document.getElementById('tlsIn');
+const pathIn=document.getElementById('pathIn');
+const cidIn=document.getElementById('cidIn');
+const topicTlmIn=document.getElementById('topicTlmIn');
+const topicMotorIn=document.getElementById('topicMotorIn');
+const topicThrIn=document.getElementById('topicThrIn');
+const topicCfgIn=document.getElementById('topicCfgIn');
+const ivalIn=document.getElementById('ivalIn');
+const btnCloseModal=document.getElementById('btnCloseModal');
+const btnSaveModal=document.getElementById('btnSaveModal');
+
+/* ---------- buffers para gráficos ---------- */
+const MAXPTS = 120;
+const buf = { V:[], P:[], S:[], IB:[] };
+function pushBuf(arr,val){
+  arr.push(val);
+  if(arr.length > MAXPTS) arr.shift();
+}
+
+function drawSeries(canvasId,data,yLabel,minY=null,maxY=null){
+  const cv=document.getElementById(canvasId);
+  const ctx=cv.getContext('2d');
+  const W=cv.width=cv.clientWidth;
+  const H=cv.height=cv.clientHeight;
+  const padL=36, padB=18, padT=8, padR=6;
+
+  ctx.fillStyle="#060814";
+  ctx.fillRect(0,0,W,H);
+
+  const clean=data.filter(x=>x!=null && !Number.isNaN(x));
+  if (clean.length < 2){
+    ctx.fillStyle="#666";
+    ctx.font="11px system-ui";
+    ctx.fillText("Sem dados", W/2-30, H/2);
+    return;
+  }
+  let dmin=(minY!==null)?minY:Math.min(...clean);
+  let dmax=(maxY!==null)?maxY:Math.max(...clean);
+  if (dmin === dmax){ dmin-=1; dmax+=1; }
+
+  ctx.strokeStyle="#15192b";
+  ctx.lineWidth=1;
+  const ticks=4;
+  for(let i=0;i<=ticks;i++){
+    const y=padT+(H-padT-padB)*i/ticks;
+    ctx.beginPath();
+    ctx.moveTo(padL,y);
+    ctx.lineTo(W-padR,y);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle="#22263a";
+  ctx.strokeRect(padL,padT,W-padL-padR,H-padT-padB);
+
+  ctx.fillStyle="#9aa4b2";
+  ctx.font="10px system-ui";
+  for(let i=0;i<=ticks;i++){
+    const val=dmax-(dmax-dmin)*i/ticks;
+    const y=padT+(H-padT-padB)*i/ticks+3;
+    ctx.fillText(val.toFixed( (Math.abs(dmax-dmin)<5)?2:1 ),4,y);
+  }
+  ctx.fillText(yLabel,4,padT+10);
+
+  ctx.strokeStyle="#7aa2f7";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  const n=data.length;
+  for(let i=0;i<n;i++){
+    const v=data[i];
+    if(v==null || Number.isNaN(v)) continue;
+    const x=padL+(W-padL-padR)*i/(MAXPTS-1);
+    const y=padT+(H-padT-padB)*(1-(v-dmin)/(dmax-dmin));
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+/* ---------- MQTT ---------- */
+let client=null;
+let lastDraw=0;
+
+function setMqttStatus(state, text){
+  mqttText.textContent = text;
+  mqttDot.classList.remove('ok','err');
+  if (state === 'ok') mqttDot.classList.add('ok');
+  else if (state === 'err') mqttDot.classList.add('err');
+}
+
+function connectMqtt(recreate=true){
+  if (client){
+    try{ client.end(true); }catch(e){}
+    client=null;
+  }
+
+  const proto = cfg.tls ? 'wss' : 'ws';
+  const url = `${proto}://${cfg.host}:${cfg.port}${cfg.path}`;
+  const options = {
+    clientId: `${cfg.cid}-${Date.now()}`,
+    clean: true,
+    keepalive: 10,
+    reconnectPeriod: 1000,
+    connectTimeout: 30000
+  };
+
+  setMqttStatus('err','MQTT: conectando…');
+  statusLine.textContent = 'Conectando em ' + url + ' …';
+
+  try{
+    client = mqtt.connect(url, options);
+  }catch(e){
+    statusLine.textContent = 'Erro ao criar cliente MQTT: ' + e;
+    return;
+  }
+
+  client.on('connect', ()=>{
+    setMqttStatus('ok','MQTT: conectado');
+    statusLine.textContent = 'Assinando ' + cfg.topicTlm + '…';
+    client.subscribe(cfg.topicTlm,{qos:0},(err)=>{
+      if (err) {
+        statusLine.textContent = 'Erro ao assinar tópico de telemetria';
+      } else {
+        statusLine.textContent = 'Recebendo telemetria em ' + cfg.topicTlm;
+      }
+    });
+  });
+
+  client.on('reconnect', ()=>{
+    setMqttStatus('err','MQTT: reconectando…');
+  });
+
+  client.on('close', ()=>{
+    setMqttStatus('err','MQTT: desconectado');
+  });
+
+  client.on('error', (err)=>{
+    setMqttStatus('err','MQTT: erro');
+    console.log('MQTT error',err);
+  });
+
+  client.on('message', (topic,payload)=>{
+    if (topic !== cfg.topicTlm) return;
+    const now = performance.now();
+    if (now - lastDraw < cfg.IV) return;
+    lastDraw = now;
+
+    let d=null;
+    try{ d = JSON.parse(payload.toString()); }
+    catch(e){ return; }
+
+    const volts = Number(d.volts);
+    const pct   = Number(d.pct);
+    const temp  = (d.temp==null)?null:Number(d.temp);
+    const humi  = (d.humi==null)?null:Number(d.humi);
+    const rpm   = (d.rpm==null)?null:Number(d.rpm);
+    const spd   = (d.speed_kmh==null)?null:Number(d.speed_kmh);
+    const ib    = (d.current_bat_a==null)?null:Number(d.current_bat_a);
+    const im    = (d.current_mot_a==null)?null:Number(d.current_mot_a);
+    const override = (d.override==1 || d.override===true);
+    const ovrPct = Number(d.override_pct || 0);
+    const src = d.src || '?';
+
+    const ratio = (ib!=null && im!=null && !isNaN(ib) && !isNaN(im) && Math.abs(im)>1e-3)
+      ? (ib/im) : null;
+
+    if(!Number.isNaN(volts)) vEl.textContent = volts.toFixed(3);
+    if(!Number.isNaN(pct))   pEl.textContent = pct.toFixed(1);
+    tEl.textContent=(temp==null||Number.isNaN(temp))?'--':temp.toFixed(1);
+    hEl.textContent=(humi==null||Number.isNaN(humi))?'--':humi.toFixed(1);
+    rpmEl.textContent=(rpm==null||Number.isNaN(rpm))?'--':rpm.toFixed(1);
+    spdEl.textContent=(spd==null||Number.isNaN(spd))?'--':spd.toFixed(2);
+    ibEl.textContent=(ib==null||Number.isNaN(ib))?'--':ib.toFixed(2);
+    imEl.textContent=(im==null||Number.isNaN(im))?'--':im.toFixed(2);
+    irEl.textContent=(ratio==null||Number.isNaN(ratio))?'--':ratio.toFixed(2);
+
+    srcText.textContent = src;
+    ovrText.textContent = override ? `ON (${ovrPct.toFixed(0)}%)` : 'OFF';
+
+    pushBuf(buf.V, Number.isNaN(volts)?null:volts);
+    pushBuf(buf.P, Number.isNaN(pct)?null:pct);
+    pushBuf(buf.S, (spd==null||Number.isNaN(spd))?null:spd);
+    pushBuf(buf.IB,(ib==null||Number.isNaN(ib))?null:ib);
+
+    drawSeries('cvV',buf.V,'V');
+    drawSeries('cvP',buf.P,'%',0,100);
+    drawSeries('cvS',buf.S,'km/h');
+    drawSeries('cvIB',buf.IB,'A');
+
+    statusLine.textContent = 'Última mensagem: ' + new Date().toLocaleTimeString();
+  });
+}
+
+/* ---------- Publicadores ---------- */
+function publish(topic, payload){
+  if (!client || !client.connected) return;
+  try{
+    client.publish(topic, payload, {qos:0, retain:false});
+  }catch(e){
+    console.log('publish error', e);
+  }
+}
+
+function publishMotor(cmd){
+  publish(cfg.topicMotor, cmd);
+}
+
+function publishThrottleOverride(pct){
+  const obj = {mode:"override", pct: pct};
+  publish(cfg.topicThr, JSON.stringify(obj));
+}
+
+function publishThrottleAuto(){
+  const obj = {mode:"auto"};
+  publish(cfg.topicThr, JSON.stringify(obj));
+}
+
+function publishConfig(){
+  const obj = {};
+  const maxPctStr = maxPctIn.value.trim();
+  if (maxPctStr !== ''){
+    obj.max_pct = Number(maxPctStr);
+  }
+  obj.log = logChk.checked;
+  publish(cfg.topicCfg, JSON.stringify(obj));
+}
+
+/* ---------- UI events ---------- */
+btnStop.onclick = ()=> publishMotor('STOP');
+btnStart.onclick = ()=> publishMotor('START');
+
+btnCfg.onclick = ()=>{
+  hostIn.value = cfg.host;
+  portIn.value = cfg.port;
+  tlsIn.checked = cfg.tls;
+  pathIn.value = cfg.path;
+  cidIn.value  = cfg.cid;
+  topicTlmIn.value = cfg.topicTlm;
+  topicMotorIn.value = cfg.topicMotor;
+  topicThrIn.value   = cfg.topicThr;
+  topicCfgIn.value   = cfg.topicCfg;
+  ivalIn.value = cfg.IV;
+  modal.style.display='flex';
+};
+btnCloseModal.onclick = ()=> modal.style.display='none';
+btnSaveModal.onclick = ()=>{
+  cfg.host = hostIn.value.trim() || cfg.host;
+  cfg.port = Number(portIn.value || cfg.port);
+  cfg.tls  = !!tlsIn.checked;
+  cfg.path = pathIn.value.trim() || cfg.path;
+  cfg.cid  = cidIn.value.trim() || cfg.cid;
+  cfg.topicTlm = topicTlmIn.value.trim() || cfg.topicTlm;
+  cfg.topicMotor = topicMotorIn.value.trim() || cfg.topicMotor;
+  cfg.topicThr   = topicThrIn.value.trim() || cfg.topicThr;
+  cfg.topicCfg   = topicCfgIn.value.trim() || cfg.topicCfg;
+  cfg.IV   = Math.max(100, Math.min(2000, Number(ivalIn.value)||cfg.IV));
+  modal.style.display='none';
+  connectMqtt(true);
+};
+
+let sliderTimeout = null;
+slider.oninput = ()=>{
+  const val = Number(slider.value);
+  thVal.textContent = val.toFixed(0) + '%';
+  if (sliderTimeout) clearTimeout(sliderTimeout);
+  sliderTimeout = setTimeout(()=>{
+    publishThrottleOverride(val);
+  }, 120);
+};
+btnAuto.onclick = ()=>{
+  publishThrottleAuto();
+};
+
+btnSendCfg.onclick = publishConfig;
+
+/* ---------- inicialização ---------- */
+connectMqtt();
+drawSeries('cvV',buf.V,'V');
+drawSeries('cvP',buf.P,'%',0,100);
+drawSeries('cvS',buf.S,'km/h');
+drawSeries('cvIB',buf.IB,'A');
+</script>
+</body>
+</html>
