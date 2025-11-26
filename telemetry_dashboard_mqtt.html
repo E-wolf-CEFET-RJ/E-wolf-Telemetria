@@ -118,6 +118,10 @@
     border-color:#293043;
     color:var(--muted);
   }
+  .btn-blue{
+    background:#10213b;
+    border-color:#3b82f6;
+  }
 
   input[type=number],input[type=text]{
     background:#060814;
@@ -142,7 +146,7 @@
 
   .canvas-grid{
     display:grid;
-    grid-template-columns:repeat(2,1fr);
+    grid-template-columns:repeat(3,1fr);
     gap:8px;
   }
   .chart{
@@ -158,12 +162,24 @@
   }
   canvas{
     width:100%;
-    height:180px;
+    height:160px;
     display:block;
+  }
+
+  .pill-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    align-items:center;
+  }
+  .pill-label{
+    font-size:11px;
+    color:var(--muted);
   }
 
   @media (max-width:900px){
     .grid-metrics{grid-template-columns:repeat(2,minmax(140px,1fr))}
+    .canvas-grid{grid-template-columns:repeat(2,1fr)}
   }
   @media (max-width:640px){
     .grid-metrics{grid-template-columns:1fr}
@@ -219,6 +235,8 @@
       <span class="badge">
         override: <span id="ovrText" style="font-weight:600;margin-left:4px">?</span>
       </span>
+      <span class="badge" id="motorBadge">motor: ?</span>
+      <span class="badge" id="ackBadge">ack: —</span>
     </h1>
 
     <!-- Métricas principais -->
@@ -240,7 +258,7 @@
 
     <!-- Motor + Override -->
     <div class="section">
-      <h3>Controle de motor e override</h3>
+      <h3>Controle de motor, override e fonte</h3>
       <div class="controls-row" style="margin-bottom:6px">
         <button id="btnStop" class="btn-red">STOP</button>
         <button id="btnStart" class="btn-green">START</button>
@@ -257,25 +275,121 @@
         </div>
         <input type="range" id="throttleSlider" min="0" max="100" value="0">
         <div class="controls-row">
-          <button id="btnAuto" class="btn-ghost">Modo AUTO (controle local)</button>
-          <span class="muted">Move o slider → <b>mode: override</b>. Botão AUTO → <b>mode: auto</b>.</span>
+          <div class="pill-row">
+            <span class="pill-label">Hold rápido (%):</span>
+            <input id="holdIn" type="number" min="0" max="100" step="1" value="0" style="width:70px">
+            <button id="btnHold" class="btn-blue">Aplicar Hold</button>
+          </div>
+          <button id="btnAuto" class="btn-ghost" style="margin-left:auto">Modo AUTO (controle local)</button>
+        </div>
+        <div class="muted">
+          Mover o slider → <b>modo override</b>. Botão AUTO → <b>controle local</b>. Hold aplica um valor fixo de override.
         </div>
       </div>
     </div>
 
-    <!-- Config remota -->
+    <!-- Calibração Acelerador -->
     <div class="section">
-      <h3>Configuração remota (pb/cmd/config)</h3>
+      <h3>Calibração do acelerador (MIN/MAX) e teto</h3>
+      <div class="controls-row">
+        <span class="muted">MIN atual: <b id="minv">--</b> V</span>
+        <span class="muted">MAX atual: <b id="maxv">--</b> V</span>
+      </div>
+      <div class="controls-row">
+        <label class="muted">MIN (V):</label>
+        <input id="minIn" type="number" step="0.001" style="width:100px">
+        <button id="btnMinSet" class="btn-ghost">Aplicar MIN</button>
+
+        <label class="muted">MAX (V):</label>
+        <input id="maxIn" type="number" step="0.001" style="width:100px">
+        <button id="btnMaxSet" class="btn-ghost">Aplicar MAX</button>
+      </div>
+      <div class="controls-row">
+        <button id="btnMinFromNow" class="btn-ghost">Definir MIN = tensão atual</button>
+        <button id="btnMaxFromNow" class="btn-ghost">Definir MAX = tensão atual</button>
+        <button id="btnMinMaxDefault" class="btn-ghost">Restaurar padrão (0.8 / 4.2 V)</button>
+      </div>
       <div class="controls-row">
         <label class="muted">Teto de aceleração (max_pct):</label>
-        <input id="maxPctIn" type="number" min="0" max="100" step="1" placeholder="100">
-        <label class="muted">Log CSV:</label>
-        <label class="muted">habilitar<input id="logChk" type="checkbox"></label>
-        <button id="btnSendCfg" class="btn-ghost">Enviar config</button>
+        <input id="maxPctIn" type="number" min="0" max="100" step="1" placeholder="100" style="width:80px">
+        <button id="btnMaxPct" class="btn-ghost">Aplicar teto</button>
       </div>
-      <div class="cfg-caption">
-        Envia JSON minimalista, ex:
-        <code>{"max_pct": 70, "log": true}</code> no tópico <code>pb/cmd/config</code>.
+      <div class="muted">
+        Tudo isso é enviado em JSON no tópico <code>pb/cmd/config</code> (chaves: <code>min_v</code>, <code>max_v</code>, <code>max_pct</code>).
+      </div>
+    </div>
+
+    <!-- Roda & RPM -->
+    <div class="section">
+      <h3>Roda e sensor de RPM</h3>
+      <div class="controls-row">
+        <label class="muted">Diâmetro roda (cm):</label>
+        <input id="wheelIn" type="number" min="0.5" step="0.1" style="width:90px">
+        <button id="btnWheel" class="btn-ghost">Aplicar</button>
+
+        <label class="muted">Pulsos por volta (PPR):</label>
+        <input id="pprIn" type="number" min="1" step="1" style="width:70px">
+        <button id="btnPpr" class="btn-ghost">Aplicar</button>
+      </div>
+      <div class="muted">
+        Enviado como <code>{"wheel_cm": X, "ppr": N}</code> em <code>pb/cmd/config</code>.
+      </div>
+    </div>
+
+    <!-- Parâmetros de rampa / PWM -->
+    <div class="section">
+      <h3>Parâmetros de rampa / PWM (Arduino)</h3>
+      <div class="controls-row">
+        <label class="muted">PWM (Hz):</label>
+        <input id="pwmfIn" type="number" min="100" max="8000" step="50" value="1000" style="width:80px">
+        <label class="muted">Start mín (%):</label>
+        <input id="startMinIn" type="number" min="0" max="40" step="1" value="8" style="width:70px">
+        <button id="btnPwm" class="btn-ghost">Aplicar PWM/Start</button>
+      </div>
+      <div class="controls-row">
+        <label class="muted">Rampa rápida (ms):</label>
+        <input id="rapidMsIn" type="number" min="50" max="1500" step="10" value="250" style="width:90px">
+        <label class="muted">RapUp (pct/s):</label>
+        <input id="rapUpIn" type="number" min="10" max="400" step="5" value="150" style="width:80px">
+        <button id="btnRapid" class="btn-ghost">Aplicar rampa rápida</button>
+      </div>
+      <div class="controls-row">
+        <label class="muted">Slew UP (pct/s):</label>
+        <input id="slewUpIn" type="number" min="5" max="200" step="5" value="40" style="width:80px">
+        <label class="muted">Slew DN (pct/s):</label>
+        <input id="slewDnIn" type="number" min="5" max="300" step="5" value="60" style="width:80px">
+        <button id="btnSlew" class="btn-ghost">Aplicar Slew</button>
+      </div>
+      <div class="controls-row">
+        <label class="muted">ZeroTimeout RPM (ms):</label>
+        <input id="zeroMsIn" type="number" min="50" max="2000" step="10" value="600" style="width:90px">
+        <button id="btnZero" class="btn-ghost">Aplicar ZeroTimeout</button>
+      </div>
+      <div class="muted">
+        Esses parâmetros são enviados em <code>pb/cmd/config</code> com chaves como
+        <code>pwm_hz</code>, <code>start_min_pct</code>, <code>rapid_ms</code>, <code>rapid_up</code>,
+        <code>slew_up</code>, <code>slew_dn</code>, <code>zero_timeout_ms</code>.  
+        O firmware precisa implementar o uso delas.
+      </div>
+    </div>
+
+    <!-- CSV Logger via MQTT -->
+    <div class="section">
+      <h3>CSV Logger (LittleFS no hub)</h3>
+      <div class="controls-row">
+        <button id="btnLogStart" class="btn-green">⏺️ Iniciar log</button>
+        <button id="btnLogStop" class="btn-red">⏹️ Parar log</button>
+        <button id="btnLogClear" class="btn-ghost">🧹 Limpar arquivo</button>
+        <label class="muted">Intervalo (ms):</label>
+        <input id="logIvIn" type="number" min="100" step="100" value="1000" style="width:90px">
+        <button id="btnLogIv" class="btn-ghost">Aplicar</button>
+      </div>
+      <div class="muted">
+        Status: <span id="logStatus">—</span>
+      </div>
+      <div class="muted" style="margin-top:4px">
+        Controle via MQTT (<code>pb/cmd/config</code>): <code>{"log": true/false, "log_iv_ms": N, "log_clear": true}</code>.  
+        Para baixar o CSV, use a rota HTTP exposta pelo ESP (ex: <code>/telemetry.csv</code>), se o firmware fornecer.
       </div>
     </div>
 
@@ -287,6 +401,11 @@
         <div class="chart"><h4>Aceleração (%)</h4><canvas id="cvP"></canvas></div>
         <div class="chart"><h4>Velocidade (km/h)</h4><canvas id="cvS"></canvas></div>
         <div class="chart"><h4>Ibateria (A)</h4><canvas id="cvIB"></canvas></div>
+        <div class="chart"><h4>Temperatura (°C)</h4><canvas id="cvT"></canvas></div>
+        <div class="chart"><h4>Umidade (%)</h4><canvas id="cvH"></canvas></div>
+        <div class="chart"><h4>RPM</h4><canvas id="cvR"></canvas></div>
+        <div class="chart"><h4>Imotor (A)</h4><canvas id="cvIM"></canvas></div>
+        <div class="chart"><h4>Ib/Im (adim.)</h4><canvas id="cvIR"></canvas></div>
       </div>
     </div>
   </div>
@@ -387,6 +506,8 @@ const mqttDot   = document.getElementById('mqttDot');
 const mqttText  = document.getElementById('mqttText');
 const srcText   = document.getElementById('srcText');
 const ovrText   = document.getElementById('ovrText');
+const motorBadge = document.getElementById('motorBadge');
+const ackBadge   = document.getElementById('ackBadge');
 
 const vEl=document.getElementById('v');
 const pEl=document.getElementById('p');
@@ -406,10 +527,48 @@ const btnCfg=document.getElementById('btnCfg');
 const slider=document.getElementById('throttleSlider');
 const thVal=document.getElementById('thVal');
 const btnAuto=document.getElementById('btnAuto');
+const holdIn=document.getElementById('holdIn');
+const btnHold=document.getElementById('btnHold');
 
+/* Calibração */
+const minvEl=document.getElementById('minv');
+const maxvEl=document.getElementById('maxv');
+const minIn=document.getElementById('minIn');
+const maxIn=document.getElementById('maxIn');
 const maxPctIn=document.getElementById('maxPctIn');
-const logChk=document.getElementById('logChk');
-const btnSendCfg=document.getElementById('btnSendCfg');
+const btnMinSet=document.getElementById('btnMinSet');
+const btnMaxSet=document.getElementById('btnMaxSet');
+const btnMinFromNow=document.getElementById('btnMinFromNow');
+const btnMaxFromNow=document.getElementById('btnMaxFromNow');
+const btnMinMaxDefault=document.getElementById('btnMinMaxDefault');
+const btnMaxPct=document.getElementById('btnMaxPct');
+
+/* Roda & RPM */
+const wheelIn=document.getElementById('wheelIn');
+const pprIn=document.getElementById('pprIn');
+const btnWheel=document.getElementById('btnWheel');
+const btnPpr=document.getElementById('btnPpr');
+
+/* Rampa / PWM */
+const pwmfIn=document.getElementById('pwmfIn');
+const startMinIn=document.getElementById('startMinIn');
+const rapidMsIn=document.getElementById('rapidMsIn');
+const rapUpIn=document.getElementById('rapUpIn');
+const slewUpIn=document.getElementById('slewUpIn');
+const slewDnIn=document.getElementById('slewDnIn');
+const zeroMsIn=document.getElementById('zeroMsIn');
+const btnPwm=document.getElementById('btnPwm');
+const btnRapid=document.getElementById('btnRapid');
+const btnSlew=document.getElementById('btnSlew');
+const btnZero=document.getElementById('btnZero');
+
+/* Logger */
+const btnLogStart=document.getElementById('btnLogStart');
+const btnLogStop=document.getElementById('btnLogStop');
+const btnLogClear=document.getElementById('btnLogClear');
+const logIvIn=document.getElementById('logIvIn');
+const btnLogIv=document.getElementById('btnLogIv');
+const logStatus=document.getElementById('logStatus');
 
 /* Modal */
 const modal=document.getElementById('modal');
@@ -428,7 +587,7 @@ const btnSaveModal=document.getElementById('btnSaveModal');
 
 /* ---------- buffers para gráficos ---------- */
 const MAXPTS = 120;
-const buf = { V:[], P:[], S:[], IB:[] };
+const buf = { V:[], P:[], S:[], IB:[], T:[], H:[], R:[], IM:[], IR:[] };
 function pushBuf(arr,val){
   arr.push(val);
   if(arr.length > MAXPTS) arr.shift();
@@ -495,6 +654,10 @@ function drawSeries(canvasId,data,yLabel,minY=null,maxY=null){
 /* ---------- MQTT ---------- */
 let client=null;
 let lastDraw=0;
+
+/* últimos valores pra usar em "usar valor atual" */
+let lastVolts = NaN;
+let lastPct   = NaN;
 
 function setMqttStatus(state, text){
   mqttText.textContent = text;
@@ -579,6 +742,9 @@ function connectMqtt(recreate=true){
     const ratio = (ib!=null && im!=null && !isNaN(ib) && !isNaN(im) && Math.abs(im)>1e-3)
       ? (ib/im) : null;
 
+    lastVolts = volts;
+    lastPct   = pct;
+
     if(!Number.isNaN(volts)) vEl.textContent = volts.toFixed(3);
     if(!Number.isNaN(pct))   pEl.textContent = pct.toFixed(1);
     tEl.textContent=(temp==null||Number.isNaN(temp))?'--':temp.toFixed(1);
@@ -592,15 +758,60 @@ function connectMqtt(recreate=true){
     srcText.textContent = src;
     ovrText.textContent = override ? `ON (${ovrPct.toFixed(0)}%)` : 'OFF';
 
+    // motor ON/OFF – heurística: se override não está travando e pct > 0
+    const motorOn = (!override && !Number.isNaN(pct) && pct > 0.5);
+    motorBadge.textContent = 'motor: ' + (motorOn ? 'ON' : 'OFF');
+
+    // ACK (se vier no JSON)
+    const ack = (d.ack || '').toString().trim();
+    ackBadge.textContent = 'ack: ' + (ack ? ack : '—');
+
+    // Calibração mostrada
+    if (typeof d.min === 'number') {
+      minvEl.textContent = d.min.toFixed(3);
+      if (document.activeElement !== minIn) minIn.value = d.min.toFixed(3);
+    }
+    if (typeof d.max === 'number') {
+      maxvEl.textContent = d.max.toFixed(3);
+      if (document.activeElement !== maxIn) maxIn.value = d.max.toFixed(3);
+    }
+    if (typeof d.max_pct === 'number' && document.activeElement !== maxPctIn) {
+      maxPctIn.value = d.max_pct.toFixed(0);
+    }
+    if (typeof d.wheel_cm === 'number' && document.activeElement !== wheelIn) {
+      wheelIn.value = d.wheel_cm.toFixed(1);
+    }
+    if (typeof d.ppr === 'number' && document.activeElement !== pprIn) {
+      pprIn.value = d.ppr.toString();
+    }
+
+    // Logger status (se o firmware mandar)
+    if (typeof d.log_enabled !== 'undefined') {
+      const sz = d.log_size || 0;
+      const iv = d.log_iv_ms || 0;
+      logStatus.textContent = (d.log_enabled ? 'ON' : 'OFF') + ' • ' + sz + ' bytes @ ' + iv + ' ms';
+      if (iv && document.activeElement !== logIvIn) logIvIn.value = iv;
+    }
+
     pushBuf(buf.V, Number.isNaN(volts)?null:volts);
     pushBuf(buf.P, Number.isNaN(pct)?null:pct);
     pushBuf(buf.S, (spd==null||Number.isNaN(spd))?null:spd);
     pushBuf(buf.IB,(ib==null||Number.isNaN(ib))?null:ib);
+    pushBuf(buf.T, (temp==null||Number.isNaN(temp))?null:temp);
+    pushBuf(buf.H, (humi==null||Number.isNaN(humi))?null:humi);
+    pushBuf(buf.R, (rpm==null||Number.isNaN(rpm))?null:rpm);
+    pushBuf(buf.IM,(im==null||Number.isNaN(im))?null:im);
+    pushBuf(buf.IR,(ratio==null||Number.isNaN(ratio))?null:ratio);
 
     drawSeries('cvV',buf.V,'V');
     drawSeries('cvP',buf.P,'%',0,100);
     drawSeries('cvS',buf.S,'km/h');
     drawSeries('cvIB',buf.IB,'A');
+    drawSeries('cvT',buf.T,'°C');
+    drawSeries('cvH',buf.H,'%',0,100);
+    drawSeries('cvR',buf.R,'RPM');
+    drawSeries('cvIM',buf.IM,'A');
+    drawSeries('cvIR',buf.IR,'Ib/Im');
 
     statusLine.textContent = 'Última mensagem: ' + new Date().toLocaleTimeString();
   });
@@ -630,14 +841,8 @@ function publishThrottleAuto(){
   publish(cfg.topicThr, JSON.stringify(obj));
 }
 
-function publishConfig(){
-  const obj = {};
-  const maxPctStr = maxPctIn.value.trim();
-  if (maxPctStr !== ''){
-    obj.max_pct = Number(maxPctStr);
-  }
-  obj.log = logChk.checked;
-  publish(cfg.topicCfg, JSON.stringify(obj));
+function sendConfigPatch(patch){
+  publish(cfg.topicCfg, JSON.stringify(patch));
 }
 
 /* ---------- UI events ---------- */
@@ -686,7 +891,76 @@ btnAuto.onclick = ()=>{
   publishThrottleAuto();
 };
 
-btnSendCfg.onclick = publishConfig;
+/* Hold = basicamente override travado no valor do campo */
+btnHold.onclick = ()=>{
+  const n = Math.max(0, Math.min(100, parseInt(holdIn.value || "0", 10)));
+  slider.value = n;
+  thVal.textContent = n.toFixed(0) + '%';
+  publishThrottleOverride(n);
+};
+
+/* Calibração */
+btnMinSet.onclick = ()=>{
+  const v = parseFloat(minIn.value || "0");
+  if (!Number.isNaN(v)) sendConfigPatch({min_v: v});
+};
+btnMaxSet.onclick = ()=>{
+  const v = parseFloat(maxIn.value || "0");
+  if (!Number.isNaN(v)) sendConfigPatch({max_v: v});
+};
+btnMinFromNow.onclick = ()=>{
+  if (!Number.isNaN(lastVolts)) sendConfigPatch({min_v: lastVolts});
+};
+btnMaxFromNow.onclick = ()=>{
+  if (!Number.isNaN(lastVolts)) sendConfigPatch({max_v: lastVolts});
+};
+btnMinMaxDefault.onclick = ()=>{
+  sendConfigPatch({min_v: 0.8, max_v: 4.2});
+};
+btnMaxPct.onclick = ()=>{
+  const x = Math.max(0, Math.min(100, parseInt(maxPctIn.value || "100", 10)));
+  sendConfigPatch({max_pct: x});
+};
+
+/* Roda & PPR */
+btnWheel.onclick = ()=>{
+  const cm = parseFloat(wheelIn.value || "50.8");
+  if (!Number.isNaN(cm)) sendConfigPatch({wheel_cm: cm});
+};
+btnPpr.onclick = ()=>{
+  const n = parseInt(pprIn.value || "1", 10);
+  if (!Number.isNaN(n)) sendConfigPatch({ppr: n});
+};
+
+/* Rampa / PWM */
+btnPwm.onclick = ()=>{
+  const hz = Math.max(100, Math.min(8000, parseInt(pwmfIn.value || "1000", 10)));
+  const sm = Math.max(0,   Math.min(40,   parseInt(startMinIn.value || "8", 10)));
+  sendConfigPatch({pwm_hz: hz, start_min_pct: sm});
+};
+btnRapid.onclick = ()=>{
+  const ms = Math.max(50,  Math.min(1500, parseInt(rapidMsIn.value || "250", 10)));
+  const up = Math.max(10,  Math.min(400,  parseInt(rapUpIn.value   || "150", 10)));
+  sendConfigPatch({rapid_ms: ms, rapid_up: up});
+};
+btnSlew.onclick = ()=>{
+  const up = Math.max(5,   Math.min(200,  parseInt(slewUpIn.value || "40", 10)));
+  const dn = Math.max(5,   Math.min(300,  parseInt(slewDnIn.value || "60", 10)));
+  sendConfigPatch({slew_up: up, slew_dn: dn});
+};
+btnZero.onclick = ()=>{
+  const ms = Math.max(50,  Math.min(2000, parseInt(zeroMsIn.value || "600", 10)));
+  sendConfigPatch({zero_timeout_ms: ms});
+};
+
+/* Logger */
+btnLogStart.onclick = ()=> sendConfigPatch({log: true});
+btnLogStop.onclick  = ()=> sendConfigPatch({log: false});
+btnLogClear.onclick = ()=> sendConfigPatch({log_clear: true});
+btnLogIv.onclick    = ()=>{
+  const ms = Math.max(100, parseInt(logIvIn.value || "1000", 10));
+  sendConfigPatch({log_iv_ms: ms});
+};
 
 /* ---------- inicialização ---------- */
 connectMqtt();
@@ -694,6 +968,11 @@ drawSeries('cvV',buf.V,'V');
 drawSeries('cvP',buf.P,'%',0,100);
 drawSeries('cvS',buf.S,'km/h');
 drawSeries('cvIB',buf.IB,'A');
+drawSeries('cvT',buf.T,'°C');
+drawSeries('cvH',buf.H,'%',0,100);
+drawSeries('cvR',buf.R,'RPM');
+drawSeries('cvIM',buf.IM,'A');
+drawSeries('cvIR',buf.IR,'Ib/Im');
 </script>
 </body>
 </html>

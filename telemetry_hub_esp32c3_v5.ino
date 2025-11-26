@@ -1,11 +1,17 @@
-// ===== ESP32-C3 SuperMini — telemetry_hub_esp32c3_v5_serial1.ino =====
+// ===== ESP32-C3 SuperMini — telemetry_hub_esp32c3_v5_serial1_full.ino =====
 // Hub de telemetria + MQTT + OTA + mDNS + Logger CSV + BLE UART.
-// NÃO tem mais página HTTP: só WiFi + MQTT + BLE + logging.
+// NÃO tem página HTTP: só WiFi + MQTT + BLE + logging.
 // Sensores só em telemetria; o Arduino MEGA controla PWM/motor.
 //
-// AGORA: comunicação com o Arduino via Serial1 em GPIO6 (RX) e GPIO7 (TX).
+// UART0 provavelmente queimada -> usamos Serial1 em GPIO6/7 para falar com o MEGA.
 // Serial (USB) fica só para debug/log.
-
+//
+// Ligações físicas:
+//   ESP32-C3 GPIO6 (RX)  <- TX1 (D18) do MEGA  (via divisor resistivo 5V -> 3.3V)
+//   ESP32-C3 GPIO7 (TX)  -> RX1 (D19) do MEGA  (direto)
+//   GND em comum.
+//
+// ========= INCLUDES =========
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <FS.h>
@@ -17,21 +23,12 @@
 #include <time.h>
 #include <NimBLEDevice.h>
 
-// ---------------------------- UART com Arduino ----------------------------
-// Usaremos Serial1 só para o Arduino, em pinos alternativos,
-// para fugir da UART0 possivelmente queimada.
-//
-// Ligações físicas:
-//   ESP32-C3 GPIO6 (RX)  <- TX1 (D18) do MEGA  (via divisor resistivo 5V -> 3.3V)
-//   ESP32-C3 GPIO7 (TX)  -> RX1 (D19) do MEGA  (direto)
-//   GND em comum
-//
-// IMPORTANTE: colocar divisor resistivo entre TX1 (Mega) e GPIO6.
+// ========= UART COM ARDUINO (Serial1) =========
 HardwareSerial SerialArd(1);
 static const int ARD_RX_PIN = 6;  // ESP32-C3 RX para Arduino TX1
 static const int ARD_TX_PIN = 7;  // ESP32-C3 TX para Arduino RX1
 
-// ---------------------------- MQTT ----------------------------
+// ========= MQTT =========
 const char* MQTT_HOST = "broker.mqtt-dashboard.com";
 const uint16_t MQTT_PORT = 1883;
 const char* MQTT_ID_BASE = "EWolfTelemetryC3";
@@ -47,7 +44,7 @@ PubSubClient mqtt(espClient);
 unsigned long lastMqtt = 0;
 const unsigned long MQTT_IV_MS = 1000;
 
-// ---------------------------- Estado vindo do Arduino --------------------
+// ========= ESTADO VINDO DO ARDUINO =========
 volatile float g_volts=0, g_pct=0, g_temp=NAN, g_humi=NAN;
 volatile float g_rpm=0, g_speed_kmh=0;
 volatile float g_min_v=0.80f, g_max_v=4.20f;
@@ -61,19 +58,30 @@ volatile float g_current_mot_a=0.0f;
 volatile float g_current_a=0.0f;
 
 volatile float g_max_pct = 100.0f;
-volatile uint32_t g_poll_ms = 1000;
+volatile uint32_t g_poll_ms = 1000;    // só espelhado/telemetria (quem manda é o MEGA)
 
 String sensLine;
 String lastAck;
 unsigned long lastAckMs=0;
 
-// ------ DETECÇÃO INICIAL DE TELEMETRIA DO ARDUINO ------
+// ========= PARÂMETROS EXTRA (PWM/RAMPAS) =========
+// Esses vêm de pb/cmd/config e são espelhados no JSON/CSV.
+// Implementação no MEGA fica para depois (via protocolo serial).
+float g_pwm_hz        = 1000.0f;  // PWM (Hz)
+float g_start_min_pct = 8.0f;     // start mínimo (%)
+float g_rapid_ms      = 250.0f;   // rampa rápida (ms)
+float g_rapid_up      = 150.0f;   // rapid up (pct/s)
+float g_slew_up       = 40.0f;    // slew up (pct/s)
+float g_slew_dn       = 60.0f;    // slew down (pct/s)
+float g_zero_timeout_ms = 600.0f; // zerar RPM após
+
+// ========= DETECÇÃO INICIAL DE TELEMETRIA DO ARDUINO =========
 bool haveSerialData = false;            // se já chegou QUALQUER byte do Arduino
 bool reportedSerialStatus = false;      // se já falamos no Serial (USB) o status da telemetria
 unsigned long serialCheckStartMs = 0;   // começa a contar no fim do setup
 const unsigned long SERIAL_CHECK_WINDOW_MS = 5000; // janela inicial de 5 s
 
-// ---------------------------- Controle: quem manda? ----------------------
+// ========= CONTROLE: QUEM MANDA? =========
 enum ControlSource {
   CTRL_LOCAL = 0,   // acelerador físico / Arduino
   CTRL_BLE   = 1,   // app BLE
@@ -84,14 +92,14 @@ ControlSource g_ctrl_src = CTRL_LOCAL;
 unsigned long g_ctrl_src_last_ms = 0;
 const unsigned long CTRL_TIMEOUT_MS = 2000; // 2s sem comando remoto -> volta pro local
 
-// ---------------------------- Logging CSV (LittleFS) -------------------------
+// ========= LOGGING CSV (LittleFS) =========
 static const char* LOG_PATH     = "/telemetry.csv";
 static const char* LOG_PATH_OLD = "/telemetry.csv.1";
-bool     log_enabled = false;   // ainda existe, mas sem UI HTTP
+bool     log_enabled = false;
 uint32_t LOG_IV_MS = 1000;
 unsigned long lastLog = 0;
 
-// ---------------------------- BLE UART -----------------------------------
+// ========= BLE UART =========
 static NimBLECharacteristic* bleTxChar = nullptr; // ESP32 -> celular
 static NimBLECharacteristic* bleRxChar = nullptr; // celular -> ESP32
 
@@ -100,13 +108,12 @@ int bleMode = 0;
 volatile bool  g_ble_remote_mode = false;
 int g_ble_remote_pct = 0;
 
-// ---------------------------- Util Serial → Arduino ----------------------
+// ========= HELPERS GERAIS =========
 void sendCmd(const String& s){
-  // Agora os comandos vão pela Serial1 (SerialArd) até o Arduino
+  // Comando para o Arduino
   SerialArd.println(s);
 }
 
-// ---------------------------- Time/NTP -----------------------------------
 void setupTime() {
   configTime(0, 0, "pool.ntp.org", "time.google.com");
 }
@@ -119,7 +126,7 @@ String isoTimestamp() {
   return String(buf);
 }
 
-// ---------------------------- LittleFS helpers ---------------------------
+// ========= LittleFS helpers =========
 bool fileExistsNonEmpty(const char* path) {
   if (!LittleFS.exists(path)) return false;
   File f = LittleFS.open(path, "r"); if (!f) return false;
@@ -141,7 +148,7 @@ void rotateIfNeeded() {
 void writeCsvHeaderIfNeeded() {
   if (fileExistsNonEmpty(LOG_PATH)) return;
   File f = LittleFS.open(LOG_PATH, "a"); if (!f) return;
-  f.println(F("ts_iso,ms,volts,pct,temp,humi,rpm,speed_kmh,current_bat_a,current_mot_a,min,max,wheel_cm,ppr,override,override_pct,max_pct,rssi,src"));
+  f.println(F("ts_iso,ms,volts,pct,temp,humi,rpm,speed_kmh,current_bat_a,current_mot_a,min,max,wheel_cm,ppr,override,override_pct,max_pct,rssi,src,log_enabled,log_iv_ms,pwm_hz,start_min_pct,rapid_ms,rapid_up,slew_up,slew_dn,zero_timeout_ms,ack"));
   f.close();
 }
 String fmtMaybeNan(float v, int digits=3) {
@@ -182,139 +189,22 @@ void appendCsvRow() {
   f.print(String(g_override_pct,0)); f.print(',');
   f.print(String(g_max_pct,0)); f.print(',');
   f.print(wifiRSSI()); f.print(',');
-  f.print(ctrlSrcName(g_ctrl_src));
+  f.print(ctrlSrcName(g_ctrl_src)); f.print(',');
+  f.print(log_enabled ? 1 : 0); f.print(',');
+  f.print(LOG_IV_MS); f.print(',');
+  f.print(String(g_pwm_hz,1)); f.print(',');
+  f.print(String(g_start_min_pct,1)); f.print(',');
+  f.print(String(g_rapid_ms,1)); f.print(',');
+  f.print(String(g_rapid_up,1)); f.print(',');
+  f.print(String(g_slew_up,1)); f.print(',');
+  f.print(String(g_slew_dn,1)); f.print(',');
+  f.print(String(g_zero_timeout_ms,1)); f.print(',');
+  f.print(lastAck);
   f.println();
   f.close();
 }
 
-// ---------------------------- MQTT --------------------------------------
-void mqttCallback(char* topic, byte* payload, unsigned int length){
-  String top = String(topic);
-
-  // 1) Comando de motor (START/STOP etc)
-  if (top == TOP_CMD_MOTOR){
-    char c=0;
-    for (unsigned int i=0;i<length;i++){
-      if(!isspace(payload[i])){
-        c=(char)payload[i];
-        break;
-      }
-    }
-    if (c=='0'){ sendCmd(F("START")); }
-    else if (c=='1'){ sendCmd(F("STOP")); }
-    else {
-      String msg;
-      msg.reserve(length);
-      for(unsigned int i=0;i<length;i++) msg += (char)payload[i];
-      msg.trim();
-      if (msg.equalsIgnoreCase("ON")||msg.equalsIgnoreCase("START")) sendCmd(F("START"));
-      else if (msg.equalsIgnoreCase("OFF")||msg.equalsIgnoreCase("STOP")) sendCmd(F("STOP"));
-    }
-  }
-
-  // 2) Comando de throttle/override via MQTT
-  else if (top == TOP_CMD_THROTTLE){
-    String s;
-    for (unsigned int i=0;i<length;i++) s += (char)payload[i];
-    s.trim();
-
-    bool isOverride = (s.indexOf("override") >= 0);
-    bool isAuto     = (s.indexOf("auto")     >= 0);
-
-    if (isOverride) {
-      int pIdx = s.indexOf("\"pct\"");
-      float pct = g_override_pct;
-      if (pIdx >= 0) {
-        int col = s.indexOf(':', pIdx);
-        if (col > 0) pct = s.substring(col+1).toFloat();
-      }
-      g_override = true;
-      g_override_pct = constrain(pct, 0, 100);
-      g_ctrl_src = CTRL_MQTT;
-      g_ctrl_src_last_ms = millis();
-      // FUTURO: mandar override explícito para o Arduino se quiser
-    }
-    else if (isAuto) {
-      g_override = false;
-      g_ctrl_src = CTRL_LOCAL;
-      g_ctrl_src_last_ms = millis();
-      // FUTURO: mandar "OVR:0" pro Arduino
-    }
-  }
-
-  // 3) Config remota via MQTT (max_pct, min_v, max_v, wheel_cm, ppr, log, poll_ms...)
-  else if (top == TOP_CMD_CONFIG){
-    String s;
-    for (unsigned int i=0;i<length;i++) s += (char)payload[i];
-    s.trim();
-
-    int idx;
-
-    idx = s.indexOf("max_pct");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) g_max_pct = constrain(s.substring(col+1).toFloat(), 0, 100);
-    }
-
-    idx = s.indexOf("min_v");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) g_min_v = s.substring(col+1).toFloat();
-    }
-
-    idx = s.indexOf("max_v");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) g_max_v = s.substring(col+1).toFloat();
-    }
-
-    idx = s.indexOf("wheel_cm");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) g_wheel_cm = s.substring(col+1).toFloat();
-    }
-
-    idx = s.indexOf("ppr");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) g_ppr = (uint8_t)s.substring(col+1).toInt();
-    }
-
-    idx = s.indexOf("log");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) {
-        String v = s.substring(col+1);
-        v.toLowerCase();
-        if (v.indexOf("true")>=0 || v.indexOf("1")>=0) log_enabled = true;
-        else log_enabled = false;
-      }
-    }
-
-    idx = s.indexOf("poll_ms");
-    if (idx >= 0) {
-      int col = s.indexOf(':', idx);
-      if (col > 0) g_poll_ms = (uint32_t)s.substring(col+1).toInt();
-    }
-  }
-}
-
-void ensureMqtt(){
-  if (mqtt.connected()) return;
-  while (!mqtt.connected()){
-    String cid = String(MQTT_ID_BASE) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
-    // LWT pb/status = "offline"
-    if (mqtt.connect(cid.c_str(), TOP_STATUS, 0, true, "offline")){
-      mqtt.publish(TOP_STATUS, "online", true);
-      mqtt.subscribe(TOP_CMD_MOTOR);
-      mqtt.subscribe(TOP_CMD_THROTTLE);
-      mqtt.subscribe(TOP_CMD_CONFIG);
-    } else {
-      delay(1500);
-    }
-  }
-}
-
+// ========= MQTT =========
 void mqttPublishTelemetry(){
   String j = "{";
   j += "\"volts\":" + String(g_volts,3);
@@ -334,6 +224,29 @@ void mqttPublishTelemetry(){
   j += ",\"override_pct\":" + String(g_override_pct,0);
   j += ",\"max_pct\":" + String(g_max_pct,0);
   j += ",\"src\":\""; j += ctrlSrcName(g_ctrl_src); j += "\"";
+  j += ",\"poll_ms\":" + String(g_poll_ms);
+  // logger
+  j += ",\"log_enabled\":"; j += (log_enabled ? "true" : "false");
+  j += ",\"log_iv_ms\":" + String(LOG_IV_MS);
+  j += ",\"log_size\":" + String(fileSize(LOG_PATH));
+  // parâmetros extras
+  j += ",\"pwm_hz\":" + String(g_pwm_hz,1);
+  j += ",\"start_min_pct\":" + String(g_start_min_pct,1);
+  j += ",\"rapid_ms\":" + String(g_rapid_ms,1);
+  j += ",\"rapid_up\":" + String(g_rapid_up,1);
+  j += ",\"slew_up\":" + String(g_slew_up,1);
+  j += ",\"slew_dn\":" + String(g_slew_dn,1);
+  j += ",\"zero_timeout_ms\":" + String(g_zero_timeout_ms,1);
+  // ack
+  j += ",\"ack\":";
+  if (lastAck.length() > 0) {
+    j += "\"";
+    String esc = lastAck; esc.replace("\"","\\\"");
+    j += esc;
+    j += "\"";
+  } else {
+    j += "null";
+  }
   j += "}";
 
   bool ok = mqtt.publish(TOP_TLM_JSON, j.c_str(), false);
@@ -343,7 +256,247 @@ void mqttPublishTelemetry(){
   }
 }
 
-// ---------------------------- OTA + mDNS ---------------------------------
+void mqttCallback(char* topic, byte* payload, unsigned int length){
+  String top = String(topic);
+
+  // ----- Comando de motor -----
+  if (top == TOP_CMD_MOTOR){
+    String msg;
+    msg.reserve(length);
+    for (unsigned int i=0;i<length;i++) msg += (char)payload[i];
+    msg.trim();
+
+    if (msg.equalsIgnoreCase("0") || msg.equalsIgnoreCase("OFF") || msg.equalsIgnoreCase("STOP")){
+      sendCmd(F("STOP"));
+    } else if (msg.equalsIgnoreCase("1") || msg.equalsIgnoreCase("ON") || msg.equalsIgnoreCase("START")){
+      sendCmd(F("START"));
+    }
+  }
+
+  // ----- Throttle / override MQTT -----
+  else if (top == TOP_CMD_THROTTLE){
+    String s;
+    for (unsigned int i=0;i<length;i++) s += (char)payload[i];
+    s.trim();
+
+    bool isOverride = (s.indexOf("override") >= 0);
+    bool isAuto     = (s.indexOf("auto")     >= 0);
+
+    if (isOverride) {
+      int pIdx = s.indexOf("\"pct\"");
+      float pct = g_override_pct;
+      if (pIdx >= 0) {
+        int col = s.indexOf(':', pIdx);
+        if (col > 0) pct = s.substring(col+1).toFloat();
+      }
+      g_override = true;
+      g_override_pct = constrain(pct, 0, 100);
+      g_ctrl_src = CTRL_MQTT;
+      g_ctrl_src_last_ms = millis();
+      // Aqui, se quiser controlar o MEGA de fato, pode mandar comando serial no futuro.
+    }
+    else if (isAuto) {
+      g_override = false;
+      g_ctrl_src = CTRL_LOCAL;
+      g_ctrl_src_last_ms = millis();
+      // Idem, aqui poderia mandar "OVR:0" pro MEGA se ele suportar.
+    }
+  }
+
+  // ----- Config remota via MQTT -----
+  else if (top == TOP_CMD_CONFIG){
+    String s;
+    for (unsigned int i=0;i<length;i++) s += (char)payload[i];
+    s.trim();
+
+    int idx;
+
+    // max_pct
+    idx = s.indexOf("max_pct");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) g_max_pct = constrain(s.substring(col+1).toFloat(), 0, 100);
+    }
+
+    // min_v
+    idx = s.indexOf("min_v");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) g_min_v = s.substring(col+1).toFloat();
+    }
+
+    // max_v
+    idx = s.indexOf("max_v");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) g_max_v = s.substring(col+1).toFloat();
+    }
+
+    // wheel_cm
+    idx = s.indexOf("wheel_cm");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) g_wheel_cm = s.substring(col+1).toFloat();
+    }
+
+    // ppr
+    idx = s.indexOf("ppr");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) g_ppr = (uint8_t)s.substring(col+1).toInt();
+    }
+
+    // log on/off
+    idx = s.indexOf("log");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        String v = s.substring(col+1);
+        v.toLowerCase();
+        if (v.indexOf("true")>=0 || v.indexOf("1")>=0) log_enabled = true;
+        else log_enabled = false;
+      }
+    }
+
+    // poll_ms (espelho)
+    idx = s.indexOf("poll_ms");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) g_poll_ms = (uint32_t)s.substring(col+1).toInt();
+    }
+
+    // log_iv_ms
+    idx = s.indexOf("log_iv_ms");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        uint32_t ms = (uint32_t)s.substring(col+1).toInt();
+        if (ms < 100) ms = 100;
+        if (ms > 60000) ms = 60000;
+        LOG_IV_MS = ms;
+      }
+    }
+
+    // log_clear
+    idx = s.indexOf("log_clear");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        String v = s.substring(col+1);
+        v.toLowerCase();
+        bool clear = (v.indexOf("true")>=0 || v.indexOf("1")>=0);
+        if (clear) {
+          if (LittleFS.exists(LOG_PATH)) LittleFS.remove(LOG_PATH);
+          if (LittleFS.exists(LOG_PATH_OLD)) LittleFS.remove(LOG_PATH_OLD);
+        }
+      }
+    }
+
+    // pwm_hz
+    idx = s.indexOf("pwm_hz");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float hz = s.substring(col+1).toFloat();
+        if (hz < 100.0f) hz = 100.0f;
+        if (hz > 8000.0f) hz = 8000.0f;
+        g_pwm_hz = hz;
+      }
+    }
+
+    // start_min_pct
+    idx = s.indexOf("start_min_pct");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float v = s.substring(col+1).toFloat();
+        if (v < 0.0f) v = 0.0f;
+        if (v > 40.0f) v = 40.0f;
+        g_start_min_pct = v;
+      }
+    }
+
+    // rapid_ms
+    idx = s.indexOf("rapid_ms");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float ms = s.substring(col+1).toFloat();
+        if (ms < 50.0f) ms = 50.0f;
+        if (ms > 1500.0f) ms = 1500.0f;
+        g_rapid_ms = ms;
+      }
+    }
+
+    // rapid_up
+    idx = s.indexOf("rapid_up");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float v = s.substring(col+1).toFloat();
+        if (v < 10.0f) v = 10.0f;
+        if (v > 400.0f) v = 400.0f;
+        g_rapid_up = v;
+      }
+    }
+
+    // slew_up
+    idx = s.indexOf("slew_up");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float v = s.substring(col+1).toFloat();
+        if (v < 5.0f) v = 5.0f;
+        if (v > 200.0f) v = 200.0f;
+        g_slew_up = v;
+      }
+    }
+
+    // slew_dn
+    idx = s.indexOf("slew_dn");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float v = s.substring(col+1).toFloat();
+        if (v < 5.0f) v = 5.0f;
+        if (v > 300.0f) v = 300.0f;
+        g_slew_dn = v;
+      }
+    }
+
+    // zero_timeout_ms
+    idx = s.indexOf("zero_timeout_ms");
+    if (idx >= 0) {
+      int col = s.indexOf(':', idx);
+      if (col > 0) {
+        float v = s.substring(col+1).toFloat();
+        if (v < 50.0f) v = 50.0f;
+        if (v > 2000.0f) v = 2000.0f;
+        g_zero_timeout_ms = v;
+      }
+    }
+
+    // TODO: se quiser mandar esses parâmetros para o MEGA por serial,
+    // este é o lugar para montar comandos tipo "CFG_PWM:1000" etc.
+  }
+}
+
+void ensureMqtt(){
+  if (mqtt.connected()) return;
+  while (!mqtt.connected()){
+    String cid = String(MQTT_ID_BASE) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    if (mqtt.connect(cid.c_str(), TOP_STATUS, 0, true, "offline")){
+      mqtt.publish(TOP_STATUS, "online", true);
+      mqtt.subscribe(TOP_CMD_MOTOR);
+      mqtt.subscribe(TOP_CMD_THROTTLE);
+      mqtt.subscribe(TOP_CMD_CONFIG);
+    } else {
+      delay(1500);
+    }
+  }
+}
+
+// ========= OTA + mDNS =========
 void setupOTA(){
   if (MDNS.begin("telemetry")){ /* ok */ }
   ArduinoOTA.setHostname("telemetry-c3");
@@ -351,7 +504,7 @@ void setupOTA(){
   ArduinoOTA.begin();
 }
 
-// ======================== BLE (UART + throttle remoto) ===================
+// ========= BLE (Nordic UART-like) =========
 static NimBLEUUID serviceUUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
 static NimBLEUUID charRxUUID ("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
 static NimBLEUUID charTxUUID ("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
@@ -397,7 +550,6 @@ class MyRxCallbacks : public NimBLECharacteristicCallbacks {
       if (col > 0) {
         bleMode = j.substring(col+1).toInt();
         if (bleMode == 0) {
-          // volta pro controle local
           g_override = false;
           g_ctrl_src = CTRL_LOCAL;
           g_ctrl_src_last_ms = millis();
@@ -413,7 +565,6 @@ class MyRxCallbacks : public NimBLECharacteristicCallbacks {
         g_override_pct   = g_ble_remote_pct;
         g_ctrl_src       = CTRL_BLE;
         g_ctrl_src_last_ms = millis();
-        // FUTURO: mandar override pro Arduino se quiser
       }
     }
   }
@@ -429,13 +580,11 @@ void setupBLE() {
 
   NimBLEService* pService = pServer->createService(serviceUUID);
 
-  // TX: ESP32 -> Celular
   bleTxChar = pService->createCharacteristic(
       charTxUUID,
       NIMBLE_PROPERTY::NOTIFY
   );
 
-  // RX: Celular -> ESP32
   bleRxChar = pService->createCharacteristic(
       charRxUUID,
       NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
@@ -469,9 +618,9 @@ void bleSendSpeedo() {
   bleTxChar->notify();
 }
 
-// ---------------------------- Setup --------------------------------------
+// ========= SETUP =========
 void setup(){
-  // Serial USB só pra debug
+  // Serial USB para debug
   Serial.begin(115200);
   Serial.setTimeout(50);
 
@@ -499,23 +648,22 @@ void setup(){
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(1024);   // buffer maior pro JSON de telemetria
+  mqtt.setBufferSize(2048);   // buffer maior pro JSON gordo
 
   setupOTA();
   setupTime();
   setupBLE();
 
-  // inicia contagem da janela de verificação da telemetria do Arduino
   serialCheckStartMs = millis();
 }
 
-// ---------------------------- Loop ---------------------------------------
+// ========= LOOP =========
 void loop(){
   ArduinoOTA.handle();
 
-  // Ler telemetria do Arduino (linha K:V) via Serial1 (SerialArd)
+  // ---- Ler telemetria do Arduino (linha K:V) via Serial1 ----
   while (SerialArd.available()){
-    haveSerialData = true;  // já sabemos que chegou ALGUMA coisa do Arduino
+    haveSerialData = true;
     char c=(char)SerialArd.read();
     if (c=='\n'){
       String line=sensLine; sensLine="";
@@ -553,6 +701,7 @@ void loop(){
             else if (k=="OVR")     g_override = (v.toInt()!=0);
             else if (k=="OVRPCT")  g_override_pct = v.toFloat();
             else if (k=="MAXPCT")  g_max_pct = v.toFloat();
+            // se no futuro o MEGA mandar PWM/RAMPAS em K:V, dá pra atualizar aqui também.
           }
           pos = next+1;
         }
@@ -563,7 +712,7 @@ void loop(){
     }
   }
 
-  // --------- Checagem única se está recebendo algo do Arduino ---------
+  // ---- Checagem única se está recebendo algo do Arduino ----
   if (!reportedSerialStatus) {
     unsigned long nowMs = millis();
     if (nowMs - serialCheckStartMs > SERIAL_CHECK_WINDOW_MS) {
@@ -576,7 +725,7 @@ void loop(){
     }
   }
 
-  // Timeout de controle remoto -> volta pro local
+  // ---- Timeout de controle remoto -> volta pro local ----
   unsigned long now = millis();
   if (g_ctrl_src != CTRL_LOCAL &&
       (now - g_ctrl_src_last_ms) > CTRL_TIMEOUT_MS) {
@@ -584,7 +733,7 @@ void loop(){
     g_override = false;
   }
 
-  // MQTT keepalive + publicação
+  // ---- MQTT keepalive + publicação ----
   ensureMqtt();
   mqtt.loop();
   if (now - lastMqtt >= MQTT_IV_MS){
@@ -593,7 +742,7 @@ void loop(){
     if (lastAck.length()>0 && (now - lastAckMs) > 2000) lastAck="";
   }
 
-  // Logging CSV (se ativar via MQTT/Serial)
+  // ---- Logging CSV ----
   if (log_enabled) {
     unsigned long nowMs2 = millis();
     if (nowMs2 - lastLog >= LOG_IV_MS) {
@@ -602,7 +751,7 @@ void loop(){
     }
   }
 
-  // BLE broadcast
+  // ---- BLE broadcast ----
   static unsigned long lastBle = 0;
   if (now - lastBle >= 200) {
     lastBle = now;
