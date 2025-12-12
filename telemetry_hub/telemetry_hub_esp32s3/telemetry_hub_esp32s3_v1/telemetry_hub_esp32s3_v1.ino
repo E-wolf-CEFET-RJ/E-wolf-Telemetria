@@ -1,16 +1,13 @@
-// ===== ESP32-C3 SuperMini — telemetry_hub_esp32c3_v5_serial1_full.ino =====
+// ===== ESP32-S3 N16R8 — telemetry_hub_esp32s3_v1.ino =====
 // Hub de telemetria + MQTT + OTA + mDNS + Logger CSV + BLE UART.
-// NÃO tem página HTTP: só WiFi + MQTT + BLE + logging.
-// Sensores só em telemetria; o Arduino MEGA controla PWM/motor.
+// Sem página HTTP; WiFi + MQTT + BLE + logging.
+// Sensores só em telemetria; MEGA controla PWM/motor.
 //
-// UART0 provavelmente queimada -> usamos Serial1 em GPIO6/7 para falar com o MEGA.
-// Serial (USB) fica só para debug/log.
-//
-// Ligações físicas:
-//   ESP32-C3 GPIO6 (RX)  <- TX1 (D18) do MEGA  (via divisor resistivo 5V -> 3.3V)
-//   ESP32-C3 GPIO7 (TX)  -> RX1 (D19) do MEGA  (direto)
-//   GND em comum.
-//
+// ATUALIZAÇÃO PARA ESP32-S3:
+// UART realocada para GPIO9 (RX) e GPIO10 (TX), pois 6/7 não existem no S3.
+// USB serial do S3 fica livre para debug.
+// =====================================================
+
 // ========= INCLUDES =========
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -24,99 +21,97 @@
 #include <NimBLEDevice.h>
 
 // ========= UART COM ARDUINO (Serial1) =========
+// Novo mapeamento ESP32-S3:
 HardwareSerial SerialArd(1);
-static const int ARD_RX_PIN = 6;  // ESP32-C3 RX para Arduino TX1
-static const int ARD_TX_PIN = 7;  // ESP32-C3 TX para Arduino RX1
+
+// Bons pinos universais no S3:
+static const int ARD_RX_PIN = 9;   // ESP32-S3 RX  <- TX do MEGA
+static const int ARD_TX_PIN = 10;  // ESP32-S3 TX  -> RX do MEGA
 
 // ========= MQTT =========
 const char* MQTT_HOST = "broker.mqtt-dashboard.com";
 const uint16_t MQTT_PORT = 1883;
-const char* MQTT_ID_BASE = "EWolfTelemetryC3";
+const char* MQTT_ID_BASE = "EWolfTelemetryS3";
 
 const char* TOP_TLM_JSON    = "pb/telemetry/json";
-const char* TOP_CMD_MOTOR   = "pb/cmd/motor";    // 0/1, START/STOP
-const char* TOP_STATUS      = "pb/status";       // LWT
-const char* TOP_CMD_THROTTLE= "pb/cmd/throttle"; // override de aceleração
-const char* TOP_CMD_CONFIG  = "pb/cmd/config";   // ajustes de config
+const char* TOP_CMD_MOTOR   = "pb/cmd/motor";
+const char* TOP_STATUS      = "pb/status";
+const char* TOP_CMD_THROTTLE= "pb/cmd/throttle";
+const char* TOP_CMD_CONFIG  = "pb/cmd/config";
 
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
 unsigned long lastMqtt = 0;
 const unsigned long MQTT_IV_MS = 1000;
 
-// ========= ESTADO VINDO DO ARDUINO =========
+// ========= ESTADOS =========
 volatile float g_volts=0, g_pct=0, g_temp=NAN, g_humi=NAN;
 volatile float g_rpm=0, g_speed_kmh=0;
 volatile float g_min_v=0.80f, g_max_v=4.20f;
 volatile float g_wheel_cm=50.8f;
 volatile uint8_t g_ppr=1;
-volatile bool   g_override=false;      // override vindo de algum lugar (local/BLE/MQTT)
-volatile float  g_override_pct=0;      // valor do override (0–100%)
-
+volatile bool   g_override=false;
+volatile float  g_override_pct=0;
 volatile float g_current_bat_a=0.0f;
 volatile float g_current_mot_a=0.0f;
 volatile float g_current_a=0.0f;
-
 volatile float g_max_pct = 100.0f;
-volatile uint32_t g_poll_ms = 1000;    // só espelhado/telemetria (quem manda é o MEGA)
+volatile uint32_t g_poll_ms = 1000;
 
 String sensLine;
 String lastAck;
 unsigned long lastAckMs=0;
 
-// ========= PARÂMETROS EXTRA (PWM/RAMPAS) =========
-// Esses vêm de pb/cmd/config e são espelhados no JSON/CSV.
-// Implementação no MEGA fica para depois (via protocolo serial).
-float g_pwm_hz        = 1000.0f;  // PWM (Hz)
-float g_start_min_pct = 8.0f;     // start mínimo (%)
-float g_rapid_ms      = 250.0f;   // rampa rápida (ms)
-float g_rapid_up      = 150.0f;   // rapid up (pct/s)
-float g_slew_up       = 40.0f;    // slew up (pct/s)
-float g_slew_dn       = 60.0f;    // slew down (pct/s)
-float g_zero_timeout_ms = 600.0f; // zerar RPM após
+// ========= PARÂMETROS EXTRA =========
+float g_pwm_hz        = 1000.0f;
+float g_start_min_pct = 8.0f;
+float g_rapid_ms      = 250.0f;
+float g_rapid_up      = 150.0f;
+float g_slew_up       = 40.0f;
+float g_slew_dn       = 60.0f;
+float g_zero_timeout_ms = 600.0f;
 
-// ========= DETECÇÃO INICIAL DE TELEMETRIA DO ARDUINO =========
-bool haveSerialData = false;            // se já chegou QUALQUER byte do Arduino
-bool reportedSerialStatus = false;      // se já falamos no Serial (USB) o status da telemetria
-unsigned long serialCheckStartMs = 0;   // começa a contar no fim do setup
-const unsigned long SERIAL_CHECK_WINDOW_MS = 5000; // janela inicial de 5 s
+// ========= DETECÇÃO DE TELEMETRIA =========
+bool haveSerialData = false;
+bool reportedSerialStatus = false;
+unsigned long serialCheckStartMs = 0;
+const unsigned long SERIAL_CHECK_WINDOW_MS = 5000;
 
-// ========= CONTROLE: QUEM MANDA? =========
+// ========= ORIGEM DO CONTROLE =========
 enum ControlSource {
-  CTRL_LOCAL = 0,   // acelerador físico / Arduino
-  CTRL_BLE   = 1,   // app BLE
-  CTRL_MQTT  = 2    // dashboard MQTT
+  CTRL_LOCAL = 0,
+  CTRL_BLE   = 1,
+  CTRL_MQTT  = 2
 };
 
 ControlSource g_ctrl_src = CTRL_LOCAL;
 unsigned long g_ctrl_src_last_ms = 0;
-const unsigned long CTRL_TIMEOUT_MS = 2000; // 2s sem comando remoto -> volta pro local
+const unsigned long CTRL_TIMEOUT_MS = 2000;
 
-// ========= LOGGING CSV (LittleFS) =========
+// ========= LOGGING CSV =========
 static const char* LOG_PATH     = "/telemetry.csv";
 static const char* LOG_PATH_OLD = "/telemetry.csv.1";
 bool     log_enabled = false;
 uint32_t LOG_IV_MS = 1000;
 unsigned long lastLog = 0;
 
-// ========= BLE UART =========
-static NimBLECharacteristic* bleTxChar = nullptr; // ESP32 -> celular
-static NimBLECharacteristic* bleRxChar = nullptr; // celular -> ESP32
-
-// modo BLE: 0 = normal, 1 = RPM, 2 = controle remoto
+// ========= BLE =========
+static NimBLECharacteristic* bleTxChar = nullptr;
+static NimBLECharacteristic* bleRxChar = nullptr;
 int bleMode = 0;
 volatile bool  g_ble_remote_mode = false;
 int g_ble_remote_pct = 0;
+static bool bleClientConnected = false;
 
-// ========= HELPERS GERAIS =========
+// ========= HELPERS =========
 void sendCmd(const String& s){
-  // Comando para o Arduino
   SerialArd.println(s);
 }
 
 void setupTime() {
   configTime(0, 0, "pool.ntp.org", "time.google.com");
 }
+
 String isoTimestamp() {
   time_t now = time(nullptr);
   if (now <= 100000) return String("");
@@ -129,35 +124,48 @@ String isoTimestamp() {
 // ========= LittleFS helpers =========
 bool fileExistsNonEmpty(const char* path) {
   if (!LittleFS.exists(path)) return false;
-  File f = LittleFS.open(path, "r"); if (!f) return false;
-  size_t sz = f.size(); f.close(); return sz>0;
+  File f = LittleFS.open(path, "r"); 
+  if (!f) return false;
+  size_t sz = f.size(); 
+  f.close();
+  return sz>0;
 }
+
 size_t fileSize(const char* path) {
   if (!LittleFS.exists(path)) return 0;
-  File f = LittleFS.open(path, "r"); if (!f) return 0;
-  size_t sz=f.size(); f.close(); return sz;
+  File f = LittleFS.open(path, "r"); 
+  if (!f) return 0;
+  size_t sz=f.size(); 
+  f.close();
+  return sz;
 }
+
 void rotateIfNeeded() {
-  const size_t MAX_BYTES = 1024UL * 1024UL; // 1 MB
+  const size_t MAX_BYTES = 1024UL * 1024UL;
   size_t sz = fileSize(LOG_PATH);
   if (sz >= MAX_BYTES) {
     if (LittleFS.exists(LOG_PATH_OLD)) LittleFS.remove(LOG_PATH_OLD);
     LittleFS.rename(LOG_PATH, LOG_PATH_OLD);
   }
 }
+
 void writeCsvHeaderIfNeeded() {
   if (fileExistsNonEmpty(LOG_PATH)) return;
-  File f = LittleFS.open(LOG_PATH, "a"); if (!f) return;
+  File f = LittleFS.open(LOG_PATH, "a");
+  if (!f) return;
   f.println(F("ts_iso,ms,volts,pct,temp,humi,rpm,speed_kmh,current_bat_a,current_mot_a,min,max,wheel_cm,ppr,override,override_pct,max_pct,rssi,src,log_enabled,log_iv_ms,pwm_hz,start_min_pct,rapid_ms,rapid_up,slew_up,slew_dn,zero_timeout_ms,ack"));
   f.close();
 }
+
 String fmtMaybeNan(float v, int digits=3) {
   if (isnan(v)) return String();
   return String(v, digits);
 }
+
 int wifiRSSI() {
   return (WiFi.status()==WL_CONNECTED) ? WiFi.RSSI() : 0;
 }
+
 const char* ctrlSrcName(ControlSource s){
   switch(s){
     case CTRL_BLE:   return "BLE";
@@ -166,13 +174,17 @@ const char* ctrlSrcName(ControlSource s){
     default:         return "LOCAL";
   }
 }
+
 void appendCsvRow() {
   rotateIfNeeded();
   writeCsvHeaderIfNeeded();
-  File f = LittleFS.open(LOG_PATH, "a"); if (!f) return;
+  File f = LittleFS.open(LOG_PATH, "a"); 
+  if (!f) return;
+
   String ts = isoTimestamp();
   f.print(ts); f.print(',');
   f.print(millis()); f.print(',');
+
   f.print(String(g_volts,3)); f.print(',');
   f.print(String(g_pct,1));   f.print(',');
   f.print(fmtMaybeNan(g_temp,1)); f.print(',');
@@ -199,9 +211,167 @@ void appendCsvRow() {
   f.print(String(g_slew_up,1)); f.print(',');
   f.print(String(g_slew_dn,1)); f.print(',');
   f.print(String(g_zero_timeout_ms,1)); f.print(',');
+
   f.print(lastAck);
   f.println();
   f.close();
+}
+
+// ========= MQTT (mantido igual) =========
+// (Conteúdo idêntico ao original, sem mudanças de lógica)
+// Para economizar espaço aqui, mantive o bloco igual ao código fornecido.
+// *** TODO: BLOCO MQTT COMPLETO – MESMA LÓGICA DO CÓDIGO ORIGINAL ***
+
+// ========= BLE =========
+class MyServerCallbacks : public NimBLEServerCallbacks {
+ public:
+  void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
+    bleClientConnected = true;
+    Serial.println("[BLE] Client connected");
+  }
+
+  void onDisconnect(NimBLEServer* server, NimBLEConnInfo& connInfo, int reason) override {
+    bleClientConnected = false;
+    Serial.printf("[BLE] Client disconnected (reason=%d)\n", reason);
+    NimBLEDevice::startAdvertising();
+  }
+};
+
+class MyRxCallbacks : public NimBLECharacteristicCallbacks {
+ public:
+  void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
+    std::string v = c->getValue();
+    if (v.empty()) return;
+
+    String j = v.c_str();
+    j.trim();
+
+    Serial.print("[BLE RX] ");
+    Serial.println(j);
+
+    int modeIdx = j.indexOf("\"mode\"");
+    int pctIdx  = j.indexOf("\"pct\"");
+
+    if (modeIdx >= 0) {
+      int col = j.indexOf(':', modeIdx);
+      if (col > 0) {
+        bleMode = j.substring(col+1).toInt();
+        if (bleMode == 0) {
+          g_override = false;
+          g_ctrl_src = CTRL_LOCAL;
+          g_ctrl_src_last_ms = millis();
+        }
+      }
+    }
+
+    if (pctIdx >= 0) {
+      int col = j.indexOf(':', pctIdx);
+      if (col > 0) {
+        g_ble_remote_pct = constrain(j.substring(col+1).toInt(), 0, 100);
+        g_override       = true;
+        g_override_pct   = g_ble_remote_pct;
+        g_ctrl_src       = CTRL_BLE;
+        g_ctrl_src_last_ms = millis();
+      }
+    }
+  }
+};
+
+void setupBLE() {
+  NimBLEDevice::init("EWolf-Telemetry");
+  NimBLEDevice::setDeviceName("EWolf-Telemetry");
+  NimBLEDevice::setMTU(100);
+
+  NimBLEServer* pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  static NimBLEUUID serviceUUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+  static NimBLEUUID charRxUUID ("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
+  static NimBLEUUID charTxUUID ("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
+
+  NimBLEService* pService = pServer->createService(serviceUUID);
+
+  bleTxChar = pService->createCharacteristic(
+      charTxUUID,
+      NIMBLE_PROPERTY::NOTIFY
+  );
+
+  bleRxChar = pService->createCharacteristic(
+      charRxUUID,
+      NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+  );
+  bleRxChar->setCallbacks(new MyRxCallbacks());
+
+  pService->start();
+
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+  adv->addServiceUUID(serviceUUID);
+  adv->setName("EWolf-Telemetry");
+  adv->start();
+
+  Serial.println("[BLE] Advertising como 'EWolf-Telemetry'");
+}
+
+void bleSendSpeedo() {
+  if (!bleClientConnected || !bleTxChar) return;
+
+  String j = "{";
+  j += "\"mode\":"+String(bleMode);
+  j += ",\"speed_kmh\":"+String(g_speed_kmh,1);
+  j += ",\"rpm\":"+String(g_rpm,1);
+  j += ",\"pct\":"+String(g_pct,1);
+  j += ",\"temp\":";
+  if (isnan(g_temp)) j += "null"; else j += String(g_temp,1);
+  j += ",\"current\":"+String(g_current_bat_a,2);
+  j += "}";
+
+  bleTxChar->setValue(j.c_str());
+  bleTxChar->notify();
+}
+
+// ========= OTA =========
+void setupOTA(){
+  if (MDNS.begin("telemetry")) { }
+  ArduinoOTA.setHostname("telemetry-s3");
+  ArduinoOTA.setPassword("espota");
+  ArduinoOTA.begin();
+}
+
+// ========= SETUP =========
+void setup(){
+  Serial.begin(115200);
+  Serial.setTimeout(50);
+
+  SerialArd.begin(115200, SERIAL_8N1, ARD_RX_PIN, ARD_TX_PIN);
+  SerialArd.setTimeout(50);
+
+  LittleFS.begin(true);
+
+  WiFi.mode(WIFI_STA);
+  WiFiManager wm;
+  wm.setConfigPortalBlocking(true);
+  wm.setTimeout(120);
+  wm.setDebugOutput(false);
+  wm.autoConnect("Telemetry-Setup");
+
+  Serial.println("======================================");
+  Serial.print  (" WiFi IP:  "); Serial.println(WiFi.localIP());
+  Serial.print  (" MQTT pub: "); Serial.println(TOP_TLM_JSON);
+  Serial.print  (" MQTT sub: "); Serial.println(TOP_CMD_MOTOR);
+  Serial.print  (" MQTT sub: "); Serial.println(TOP_CMD_THROTTLE);
+  Serial.print  (" MQTT sub: "); Serial.println(TOP_CMD_CONFIG);
+  Serial.println(" UART Arduino em Serial1 (GPIO9 RX, GPIO10 TX)");
+  Serial.println("======================================");
+
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setCallback(mqttCallback);
+  mqtt.setBufferSize(2048);
+
+  setupOTA();
+  setupTime();
+  setupBLE();
+
+  serialCheckStartMs = millis();
 }
 
 // ========= MQTT =========
@@ -225,10 +395,12 @@ void mqttPublishTelemetry(){
   j += ",\"max_pct\":" + String(g_max_pct,0);
   j += ",\"src\":\""; j += ctrlSrcName(g_ctrl_src); j += "\"";
   j += ",\"poll_ms\":" + String(g_poll_ms);
+
   // logger
   j += ",\"log_enabled\":"; j += (log_enabled ? "true" : "false");
   j += ",\"log_iv_ms\":" + String(LOG_IV_MS);
   j += ",\"log_size\":" + String(fileSize(LOG_PATH));
+
   // parâmetros extras
   j += ",\"pwm_hz\":" + String(g_pwm_hz,1);
   j += ",\"start_min_pct\":" + String(g_start_min_pct,1);
@@ -237,6 +409,7 @@ void mqttPublishTelemetry(){
   j += ",\"slew_up\":" + String(g_slew_up,1);
   j += ",\"slew_dn\":" + String(g_slew_dn,1);
   j += ",\"zero_timeout_ms\":" + String(g_zero_timeout_ms,1);
+
   // ack
   j += ",\"ack\":";
   if (lastAck.length() > 0) {
@@ -293,17 +466,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length){
       g_override_pct = constrain(pct, 0, 100);
       g_ctrl_src = CTRL_MQTT;
       g_ctrl_src_last_ms = millis();
-      // Aqui, se quiser controlar o MEGA de fato, pode mandar comando serial no futuro.
     }
     else if (isAuto) {
       g_override = false;
       g_ctrl_src = CTRL_LOCAL;
       g_ctrl_src_last_ms = millis();
-      // Idem, aqui poderia mandar "OVR:0" pro MEGA se ele suportar.
     }
   }
 
-  // ----- Config remota via MQTT -----
+  // ----- Config via MQTT -----
   else if (top == TOP_CMD_CONFIG){
     String s;
     for (unsigned int i=0;i<length;i++) s += (char)payload[i];
@@ -358,7 +529,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length){
       }
     }
 
-    // poll_ms (espelho)
+    // poll_ms
     idx = s.indexOf("poll_ms");
     if (idx >= 0) {
       int col = s.indexOf(':', idx);
@@ -475,9 +646,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length){
         g_zero_timeout_ms = v;
       }
     }
-
-    // TODO: se quiser mandar esses parâmetros para o MEGA por serial,
-    // este é o lugar para montar comandos tipo "CFG_PWM:1000" etc.
   }
 }
 
@@ -496,180 +664,22 @@ void ensureMqtt(){
   }
 }
 
-// ========= OTA + mDNS =========
-void setupOTA(){
-  if (MDNS.begin("telemetry")){ /* ok */ }
-  ArduinoOTA.setHostname("telemetry-c3");
-  ArduinoOTA.setPassword("espota"); // troque!
-  ArduinoOTA.begin();
-}
-
-// ========= BLE (Nordic UART-like) =========
-static NimBLEUUID serviceUUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
-static NimBLEUUID charRxUUID ("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
-static NimBLEUUID charTxUUID ("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
-
-static bool bleClientConnected = false;
-
-class MyServerCallbacks : public NimBLEServerCallbacks {
- public:
-  void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
-    bleClientConnected = true;
-    Serial.println("[BLE] Client connected");
-  }
-
-  void onDisconnect(NimBLEServer* server, NimBLEConnInfo& connInfo, int reason) override {
-    bleClientConnected = false;
-    Serial.printf("[BLE] Client disconnected (reason=%d)\n", reason);
-    NimBLEDevice::startAdvertising();
-  }
-
-  void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
-    Serial.print("[BLE] MTU negociado = ");
-    Serial.println(MTU);
-  }
-};
-
-class MyRxCallbacks : public NimBLECharacteristicCallbacks {
- public:
-  void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    std::string v = c->getValue();
-    if (v.empty()) return;
-
-    String j = String(v.c_str());
-    j.trim();
-
-    Serial.print("[BLE RX] ");
-    Serial.println(j);
-
-    int modeIdx = j.indexOf("\"mode\"");
-    int pctIdx  = j.indexOf("\"pct\"");
-
-    if (modeIdx >= 0) {
-      int col = j.indexOf(':', modeIdx);
-      if (col > 0) {
-        bleMode = j.substring(col+1).toInt();
-        if (bleMode == 0) {
-          g_override = false;
-          g_ctrl_src = CTRL_LOCAL;
-          g_ctrl_src_last_ms = millis();
-        }
-      }
-    }
-
-    if (pctIdx >= 0) {
-      int col = j.indexOf(':', pctIdx);
-      if (col > 0) {
-        g_ble_remote_pct = constrain(j.substring(col+1).toInt(), 0, 100);
-        g_override       = true;
-        g_override_pct   = g_ble_remote_pct;
-        g_ctrl_src       = CTRL_BLE;
-        g_ctrl_src_last_ms = millis();
-      }
-    }
-  }
-};
-
-void setupBLE() {
-  NimBLEDevice::init("EWolf-Telemetry");
-  NimBLEDevice::setDeviceName("EWolf-Telemetry");
-  NimBLEDevice::setMTU(100);
-
-  NimBLEServer* pServer = NimBLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-
-  NimBLEService* pService = pServer->createService(serviceUUID);
-
-  bleTxChar = pService->createCharacteristic(
-      charTxUUID,
-      NIMBLE_PROPERTY::NOTIFY
-  );
-
-  bleRxChar = pService->createCharacteristic(
-      charRxUUID,
-      NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
-  );
-  bleRxChar->setCallbacks(new MyRxCallbacks());
-
-  pService->start();
-
-  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-  adv->addServiceUUID(serviceUUID);
-  adv->setName("EWolf-Telemetry");
-  adv->setAppearance(0x0000);
-  adv->start();
-
-  Serial.println(F("[BLE] Advertising como 'EWolf-Telemetry'"));
-}
-
-void bleSendSpeedo() {
-  if (!bleClientConnected || bleTxChar == nullptr) return;
-
-  String j = "{";
-  j += "\"mode\":"; j += bleMode;
-  j += ",\"speed_kmh\":"; j += String(g_speed_kmh,1);
-  j += ",\"rpm\":";       j += String(g_rpm,1);
-  j += ",\"pct\":";       j += String(g_pct,1);
-  j += ",\"temp\":";
-  if (isnan(g_temp)) j += "null"; else j += String(g_temp,1);
-  j += ",\"current\":"; j += String(g_current_bat_a,2);
-  j += "}";
-  bleTxChar->setValue(j.c_str());
-  bleTxChar->notify();
-}
-
-// ========= SETUP =========
-void setup(){
-  // Serial USB para debug
-  Serial.begin(115200);
-  Serial.setTimeout(50);
-
-  // Serial1 exclusiva para o Arduino
-  SerialArd.begin(115200, SERIAL_8N1, ARD_RX_PIN, ARD_TX_PIN);
-  SerialArd.setTimeout(50);
-
-  LittleFS.begin(true); // formatOnFail=true
-
-  WiFi.mode(WIFI_STA);
-  WiFiManager wm;
-  wm.setConfigPortalBlocking(true);
-  wm.setTimeout(120);
-  wm.setDebugOutput(false);
-  wm.autoConnect("Telemetry-Setup");
-
-  Serial.println(F("======================================"));
-  Serial.print  (F(" WiFi IP:  ")); Serial.println(WiFi.localIP());
-  Serial.print  (F(" MQTT pub: ")); Serial.println(TOP_TLM_JSON);
-  Serial.print  (F(" MQTT sub: ")); Serial.println(TOP_CMD_MOTOR);
-  Serial.print  (F(" MQTT sub: ")); Serial.println(TOP_CMD_THROTTLE);
-  Serial.print  (F(" MQTT sub: ")); Serial.println(TOP_CMD_CONFIG);
-  Serial.println(F(" UART Arduino em Serial1 (GPIO6 RX, GPIO7 TX)"));
-  Serial.println(F("======================================"));
-
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(2048);   // buffer maior pro JSON gordo
-
-  setupOTA();
-  setupTime();
-  setupBLE();
-
-  serialCheckStartMs = millis();
-}
 
 // ========= LOOP =========
 void loop(){
   ArduinoOTA.handle();
 
-  // ---- Ler telemetria do Arduino (linha K:V) via Serial1 ----
+  // --- Leitura da UART do MEGA (mesmo código do original) ---
   while (SerialArd.available()){
     haveSerialData = true;
     char c=(char)SerialArd.read();
+
     if (c=='\n'){
       String line=sensLine; sensLine="";
       line.replace(",", " ");
       line.replace("\r", "");
       line.trim();
+
       if (line.startsWith("ACK:")){
         lastAck = line.substring(4);
         lastAck.trim();
@@ -685,47 +695,45 @@ void loop(){
           if (dp>0){
             String k=tok.substring(0,dp);
             String v=tok.substring(dp+1);
-            if      (k=="MS")      { /* opcional, já usado no Arduino */ }
-            else if (k=="V")       g_volts = v.toFloat();
-            else if (k=="Pct")     g_pct = v.toFloat();
-            else if (k=="Temp")    g_temp = v.equalsIgnoreCase("NaN")?NAN:v.toFloat();
-            else if (k=="Humi")    g_humi = v.equalsIgnoreCase("NaN")?NAN:v.toFloat();
-            else if (k=="RPM")     g_rpm = v.toFloat();
-            else if (k=="Speed")   g_speed_kmh = v.toFloat();
-            else if (k=="I")      { g_current_bat_a = v.toFloat(); g_current_a = g_current_bat_a; }
-            else if (k=="IMOT")    g_current_mot_a = v.toFloat();
-            else if (k=="MIN")     g_min_v = v.toFloat();
-            else if (k=="MAX")     g_max_v = v.toFloat();
-            else if (k=="WHEEL")   g_wheel_cm = v.toFloat();
-            else if (k=="PPR")     g_ppr = (uint8_t)v.toInt();
-            else if (k=="OVR")     g_override = (v.toInt()!=0);
-            else if (k=="OVRPCT")  g_override_pct = v.toFloat();
-            else if (k=="MAXPCT")  g_max_pct = v.toFloat();
-            // se no futuro o MEGA mandar PWM/RAMPAS em K:V, dá pra atualizar aqui também.
+            if      (k=="V")   g_volts = v.toFloat();
+            else if (k=="Pct") g_pct = v.toFloat();
+            else if (k=="Temp")g_temp = v.equalsIgnoreCase("NaN")?NAN:v.toFloat();
+            else if (k=="Humi")g_humi = v.equalsIgnoreCase("NaN")?NAN:v.toFloat();
+            else if (k=="RPM") g_rpm = v.toFloat();
+            else if (k=="Speed")g_speed_kmh = v.toFloat();
+            else if (k=="I")   { g_current_bat_a = v.toFloat(); g_current_a = g_current_bat_a; }
+            else if (k=="IMOT")g_current_mot_a = v.toFloat();
+            else if (k=="MIN") g_min_v = v.toFloat();
+            else if (k=="MAX") g_max_v = v.toFloat();
+            else if (k=="WHEEL") g_wheel_cm = v.toFloat();
+            else if (k=="PPR") g_ppr = (uint8_t)v.toInt();
+            else if (k=="OVR") g_override = (v.toInt()!=0);
+            else if (k=="OVRPCT")g_override_pct = v.toFloat();
+            else if (k=="MAXPCT")g_max_pct = v.toFloat();
           }
           pos = next+1;
         }
       }
-    } else if (c!='\r'){
+    }
+    else if (c!='\r'){
       sensLine += c;
       if (sensLine.length()>400) sensLine="";
     }
   }
 
-  // ---- Checagem única se está recebendo algo do Arduino ----
+  // timeout serial inicial
   if (!reportedSerialStatus) {
     unsigned long nowMs = millis();
     if (nowMs - serialCheckStartMs > SERIAL_CHECK_WINDOW_MS) {
-      if (haveSerialData) {
-        Serial.println(F("DBG: Recebendo telemetria do Arduino (dados detectados na Serial1)."));
-      } else {
-        Serial.println(F("DBG: Nenhuma telemetria recebida do Arduino nos primeiros 5s na Serial1."));
-      }
+      if (haveSerialData)
+        Serial.println("DBG: Recebendo telemetria do Arduino (Serial1 OK)");
+      else
+        Serial.println("DBG: Nenhuma telemetria recebida do Arduino nos primeiros 5s.");
       reportedSerialStatus = true;
     }
   }
 
-  // ---- Timeout de controle remoto -> volta pro local ----
+  // timeout controle remoto
   unsigned long now = millis();
   if (g_ctrl_src != CTRL_LOCAL &&
       (now - g_ctrl_src_last_ms) > CTRL_TIMEOUT_MS) {
@@ -733,7 +741,7 @@ void loop(){
     g_override = false;
   }
 
-  // ---- MQTT keepalive + publicação ----
+  // MQTT
   ensureMqtt();
   mqtt.loop();
   if (now - lastMqtt >= MQTT_IV_MS){
@@ -742,7 +750,7 @@ void loop(){
     if (lastAck.length()>0 && (now - lastAckMs) > 2000) lastAck="";
   }
 
-  // ---- Logging CSV ----
+  // logging
   if (log_enabled) {
     unsigned long nowMs2 = millis();
     if (nowMs2 - lastLog >= LOG_IV_MS) {
@@ -751,7 +759,7 @@ void loop(){
     }
   }
 
-  // ---- BLE broadcast ----
+  // BLE
   static unsigned long lastBle = 0;
   if (now - lastBle >= 200) {
     lastBle = now;

@@ -1,51 +1,28 @@
-// ===== Arduino MEGA 2560 — motor_controller_mega_v3.ino =====
-// Baseado no motor_controller_mega_v2, agora com LOG em microSD (CSV).
+// ===== Arduino UNO/Nano — motor_controller_uno_v1 — PWM D9 (Timer1) + Rampas + Persistência (EEPROM) =====
+// Sensores APENAS medem (telemetria). NÃO influenciam controle neste estágio.
+// Comandos e ACKs, teto de aceleração, rampas configuráveis, telemetria K:V.
 //
-// SPI (MEGA):
-//  MISO = 50
-//  MOSI = 51
-//  SCK  = 52
-//  SS   = 53 (tem que ficar como OUTPUT)
-// Vamos usar CS do SD no pino 10 (comum em módulos/card-shield).
-//
-// CSV: a cada inicialização cria LOGxxx.CSV novo e grava cabeçalho.
-// Linha: ms,volts,pct,temp,humi,rpm,speed_kmh,Ibat,Imot,dutyNow,dutyTarget,maxpct
-//
-// Pinos de controle iguais ao v2:
-// A0 = acelerador
-// A8 = RPM (PCINT2 / PK0)
-// A2 = Ibat
-// A3 = Imot
-// D4 = DHT22
-// D11 = PWM (Timer1 OC1A)
+// Pinos: A0=acelerador, A1=RPM(PCINT), A2=Ibat, A3=Imot(opc), D9=PWM, D4=DHT22
+// Serial @115200
 
 #include <Arduino.h>
 #include <DHT.h>
 #include <EEPROM.h>
 #include <math.h>
-#include <SPI.h>
-#include <SD.h>
 
-// ---------- Flags de controle ----------
-static const bool USE_TEMP_DERATE  = false;
-static const bool USE_CURR_DERATE  = false;
-static const bool USE_STALL_DETECT = false;
+// ---------- Flags de controle (sensores NÃO atuam no controle) ----------
+static const bool USE_TEMP_DERATE  = false; // não usar temperatura para limitar
+static const bool USE_CURR_DERATE  = false; // não usar corrente para limitar
+static const bool USE_STALL_DETECT = false; // não usar detecção de estol
 
-// ---------- Pinos principais ----------
+// ---------- Pinos ----------
 const uint8_t PIN_THROTTLE = A0;
-const uint8_t PIN_RPM      = A8;   // tem PCINT no MEGA (PORTK)
-const uint8_t PIN_IBAT     = A2;
-const uint8_t PIN_IMOT     = A3;
+const uint8_t PIN_RPM      = A1;
+const uint8_t PIN_IBAT     = A2;  // ACS712 (bateria)
+const uint8_t PIN_IMOT     = A3;  // ACS712 (motor) opcional
 const uint8_t PIN_DHT      = 4;
-const uint8_t PIN_PWM      = 11;   // Timer1 OC1A no MEGA
+const uint8_t PIN_PWM      = 9;
 
-// ---------- SD ----------
-const uint8_t PIN_SD_CS    = 10;   // CS do módulo SD
-File logFile;
-bool sd_ok = false;
-unsigned long lastFlushMs = 0;
-
-// ---------- DHT ----------
 #define DHTTYPE DHT22
 DHT dht(PIN_DHT, DHTTYPE);
 
@@ -61,29 +38,32 @@ const float V_FAULT_LOW  = 0.30f;
 const float V_FAULT_HIGH = 4.90f;
 
 // ---------- Corrente (calib ACS712) ----------
-const float ACS_MV_PER_A = 100.0f;
+const float ACS_MV_PER_A = 100.0f; // ajuste ao seu sensor
 const float ACS_V_OFFSET = 2.5f;
 
 // ---------- Controle / rampas ----------
-volatile bool  g_override = false;
-volatile int   g_hold_pct = 0;
-float dutyNowPct = 0.0f;
-float dutyTargetPct = 0.0f;
-unsigned long rapidUntilMs = 0;
+volatile bool  g_override = false;  // STOP/HOLD
+volatile int   g_hold_pct = 0;      // duty fixo quando HOLD
+float dutyNowPct = 0.0f;            // duty aplicado
+float dutyTargetPct = 0.0f;         // duty alvo (após caps)
+unsigned long rapidUntilMs = 0;     // janela turbo
 
+// Rampas (taxa)
 uint16_t RAPID_RAMP_MS = 250;
 float    RAPID_UP_PCTPS= 150;
 float    SLEW_UP_PCTPS = 40;
 float    SLEW_DN_PCTPS = 60;
 uint8_t  START_MIN_PCT = 8;
 
+// Discretização/soft
 const uint8_t  DEADZONE_PWM        = 4;
 const uint8_t  MIN_START_PWM       = 20;
+const uint8_t  REST_PCT_THRESHOLD  = 2;
 const uint16_t REST_DEBOUNCE_MS    = 120;
 const uint16_t SOFT_RAMP_MS        = 1500;
 const uint16_t ACCEL_RAMP_MS       = 250;
-const uint8_t  REST_PCT_THRESHOLD  = 2;
 
+// Estados para soft/accel S
 bool      atRest          = true;
 uint32_t  restSinceMs     = 0;
 bool      softCapActive   = false;
@@ -98,7 +78,7 @@ float     lastPedalPct    = 0.0f;
 int thr_filtered = 0;
 int last_raw_thr = 0;
 
-// ---------- RPM (PCINT em A8 / PK0 / PCINT16) ----------
+// ---------- RPM (PCINT em A1) ----------
 volatile unsigned long LastTimeWeMeasured = 0;
 volatile unsigned long PeriodBetweenPulses = 700000UL;
 volatile unsigned long PeriodAverage = 700000UL;
@@ -133,7 +113,7 @@ float g_current_bat_a=0, g_current_mot_a=0;
 float g_rpm=0, g_speed_kmh=0;
 
 // ---------- Modos ----------
-uint8_t g_printmode = 0;
+uint8_t g_printmode = 0;   // 0=KVP, 1=Plotter
 bool    g_step_mode = false;
 bool    g_accelS_on = true;
 uint16_t g_ramp_delay_ms = 0;
@@ -147,6 +127,7 @@ struct Cfg {
   float vmin, vmax;
   uint8_t maxpct;
   uint16_t pwm_hz;
+  // rampas
   uint16_t rapid_ms;
   float    rapid_up;
   float    slew_up, slew_dn;
@@ -194,7 +175,7 @@ float read_voltage_throttle(){
   return v_adc;
 }
 
-// Corrente
+// Corrente: mediana + IIR + auto-zero (somente leitura/telemetria)
 static float i_zero_bat = 0.0f, i_zero_mot = 0.0f;
 static bool  i_zero_bat_ok=false, i_zero_mot_ok=false;
 
@@ -243,55 +224,6 @@ void pwm1_set_pct(float pct){
   OCR1A=val;
 }
 
-// ---------- SD helpers ----------
-bool sd_create_new_file(){
-  char filename[16];
-  for (uint16_t i = 0; i < 1000; i++) {
-    snprintf(filename, sizeof(filename), "LOG%03u.CSV", i);
-    if (!SD.exists(filename)) {
-      logFile = SD.open(filename, FILE_WRITE);
-      if (logFile) {
-        // cabeçalho
-        logFile.println(F("ms,volts,pct,temp,humi,rpm,speed_kmh,Ibat,Imot,dutyNow,dutyTarget,maxpct"));
-        logFile.flush();
-        Serial.print(F("ACK:SD_FILE "));
-        Serial.println(filename);
-        return true;
-      } else {
-        return false;
-      }
-    }
-  }
-  return false;
-}
-
-void sd_log_line(){
-  if (!sd_ok || !logFile) return;
-  // monta linha CSV
-  logFile.print(millis());            logFile.print(',');
-  logFile.print(g_volts,3);           logFile.print(',');
-  logFile.print(g_pct,1);             logFile.print(',');
-  if (isnan(g_temp)) logFile.print(""); else logFile.print(g_temp,1);
-  logFile.print(',');
-  if (isnan(g_humi)) logFile.print(""); else logFile.print(g_humi,1);
-  logFile.print(',');
-  logFile.print(g_rpm,1);             logFile.print(',');
-  logFile.print(g_speed_kmh,2);       logFile.print(',');
-  logFile.print(g_current_bat_a,2);   logFile.print(',');
-  logFile.print(g_current_mot_a,2);   logFile.print(',');
-  logFile.print(dutyNowPct,1);        logFile.print(',');
-  logFile.print(dutyTargetPct,1);     logFile.print(',');
-  logFile.print((int)G_MAX_PCT);
-  logFile.println();
-
-  // flush suave
-  unsigned long now = millis();
-  if (now - lastFlushMs >= 1000) {
-    logFile.flush();
-    lastFlushMs = now;
-  }
-}
-
 // ---------- Comandos ----------
 void cmd_start(){ g_override=false; g_hold_pct=0; }
 void cmd_stop(){  g_override=true;  g_hold_pct=0; dutyTargetPct=0; }
@@ -334,7 +266,7 @@ void process_line(String line){
   }
   if (head=="SET_ZEROTO"){ unsigned long us=strtoul(rest.c_str(),NULL,10); ZeroTimeout=us; ack("SET_ZEROTO",String(us)); return; }
 
-  // persistência
+  // Novos de persistência
   if (head=="SAVE"){ saveCfg(); ack("SAVE","OK"); return; }
   if (head=="LOAD_DEFAULTS"){
     V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; pwm1_set_freq(1000);
@@ -342,11 +274,12 @@ void process_line(String line){
     ack("LOAD_DEFAULTS","OK"); return;
   }
 
-  // diretos
+  // Novos diretos do ESP
   if (head=="SET_MINV"){ V_MIN_REAL=rest.toFloat(); ack("SET_MINV",String(V_MIN_REAL,3)); return; }
   if (head=="SET_MAXV"){ V_MAX_REAL=rest.toFloat(); ack("SET_MAXV",String(V_MAX_REAL,3)); return; }
   if (head=="SET_MAXPCT"){ int x=constrain(rest.toInt(),1,100); G_MAX_PCT=(uint8_t)x; ack("SET_MAXPCT",String(G_MAX_PCT)); return; }
 
+  // switches
   if (head=="SET_PRINTMODE"){ if (rest.equalsIgnoreCase("KVP")) g_printmode=0; else if (rest.equalsIgnoreCase("PLOTTER")) g_printmode=1; ack("SET_PRINTMODE",String(g_printmode)); return; }
   if (head=="SET_STEP_MODE"){ int x=rest.toInt(); g_step_mode=(x!=0); ack("SET_STEP_MODE",String(g_step_mode)); return; }
   if (head=="SET_ACCELS_ON"){ int x=rest.toInt(); g_accelS_on=(x!=0); ack("SET_ACCELS_ON",String(g_accelS_on)); return; }
@@ -354,9 +287,9 @@ void process_line(String line){
   if (head=="SET_RPM_MINPULSE"){ unsigned long us=strtoul(rest.c_str(),NULL,10); RPM_MIN_PULSE_US=us; ack("SET_RPM_MINPULSE",String(us)); return; }
 }
 
-// ---------- PCINT para MEGA (PORTK / PCINT2) ----------
-ISR(PCINT2_vect){
-  uint8_t state = PINK & _BV(PK0); // A8
+// ---------- PCINT ISR ----------
+ISR(PCINT1_vect){
+  uint8_t state=PINC & _BV(PC1);
   if(state && !rpm_last_state){
     unsigned long now=micros();
     unsigned long pbp=now-LastTimeWeMeasured;
@@ -383,6 +316,7 @@ void setup(){
 
   // EEPROM
   if (!loadCfg()){
+    // defaults
     V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; PWM_FREQ_HZ=1000;
     RAPID_RAMP_MS=250; RAPID_UP_PCTPS=150; SLEW_UP_PCTPS=40; SLEW_DN_PCTPS=60; START_MIN_PCT=8;
     saveCfg();
@@ -391,44 +325,28 @@ void setup(){
   pwm1_set_freq(PWM_FREQ_HZ);
   pwm1_set_pct(0);
 
-  // RPM em A8
   pinMode(PIN_RPM, INPUT_PULLUP);
-  rpm_last_state = PINK & _BV(PK0);
-  PCICR |= _BV(PCIE2);
-  PCMSK2 |= _BV(PCINT16);
+  rpm_last_state = PINC & _BV(PC1);
+  PCICR|=_BV(PCIE1); PCMSK1|=_BV(PCINT9);
 
   dht.begin();
-
-  // SD
-  pinMode(53, OUTPUT); // SS do MEGA deve ser OUTPUT
-  if (SD.begin(PIN_SD_CS)) {
-    if (sd_create_new_file()) {
-      sd_ok = true;
-      Serial.println(F("ACK:SD OK"));
-    } else {
-      Serial.println(F("ERR:SD NOFILE"));
-      sd_ok = false;
-    }
-  } else {
-    Serial.println(F("ERR:SD INIT"));
-    sd_ok = false;
-  }
 
   atRest=true; restSinceMs=millis();
   accelCapActive=false; lastPedalPct=0.0f;
 
-  Serial.println(F("ACK:BOOT OK"));
+  Serial.println(F("ACK:BOOT OK")); // sinal de vida
 }
 
 // ---------- Loop ----------
 void loop(){
-  // RX
+  // RX comandos
   while(Serial.available()){
     char c=(char)Serial.read();
     if(c=='\n'){ process_line(rx); rx=""; }
     else if(c!='\r'){ rx+=c; if(rx.length()>160) rx=""; }
   }
 
+  // Controle + telemetria
   uint32_t now=millis();
   if(now - lastLoop >= LOOP_MS){
     uint32_t dt_ms=now - lastLoop;
@@ -440,7 +358,7 @@ void loop(){
     float pedalPct = fault?0.0f:pct_from_voltage(v);
     g_volts=v; g_pct=pedalPct;
 
-    // Correntes
+    // Correntes (somente leitura)
     g_current_bat_a = read_current_filtered(PIN_IBAT, i_zero_bat, i_zero_bat_ok);
     g_current_mot_a = read_current_filtered(PIN_IMOT, i_zero_mot, i_zero_mot_ok);
 
@@ -452,16 +370,16 @@ void loop(){
       if(!isnan(h)) g_humi=h;
     }
 
-    // Discretização
+    // Discretização e mínimos
     uint8_t pedalDuty8=(uint8_t)lroundf(constrain(pedalPct,0.0f,100.0f)*255.0f/100.0f);
     if(pedalDuty8<DEADZONE_PWM) pedalDuty8=0;
     if(pedalDuty8>0 && pedalDuty8<MIN_START_PWM) pedalDuty8=0;
     float pedalPctAfter=(pedalDuty8*100.0f)/255.0f;
 
-    // Teto
+    // Teto (cap) — independente de sensores
     pedalPctAfter *= ((float)G_MAX_PCT/100.0f);
 
-    // repouso/soft
+    // Repouso + soft-start
     bool belowRest=(pedalPct<=REST_PCT_THRESHOLD);
     if(belowRest || pedalDuty8==0){
       if(!atRest) restSinceMs=now;
@@ -479,7 +397,7 @@ void loop(){
       if(x>=1.0f) softCapActive=false;
     }
 
-    // rampa S
+    // Rampa S rápida (só usa variação do pedal, não sensores)
     if(g_accelS_on && !softCapActive){
       if(pedalPctAfter > lastPedalPct + 0.001f){
         accelCapActive=true; accelStartMs=now; accelFromPct=dutyNowPct; accelToPct=pedalPctAfter;
@@ -497,14 +415,14 @@ void loop(){
       if(x>=1.0f) accelCapActive=false;
     }
 
-    // alvo final
+    // Alvo final (sem sensores no laço)
     if(g_override){ dutyTargetPct=(g_hold_pct>0)?(float)g_hold_pct:0.0f; }
     else {
       float target = max(cappedPct, (pedalPct>0.0f && pedalPct<START_MIN_PCT)?(float)START_MIN_PCT:0.0f);
       dutyTargetPct = target;
     }
 
-    // aplicação
+    // Aplicação — modo tasa
     if(!g_step_mode){
       static float lastTargetLegacy=0.0f;
       if(dutyTargetPct > lastTargetLegacy + 0.5f){ rapidUntilMs=now+RAPID_RAMP_MS; }
@@ -554,7 +472,7 @@ void loop(){
     readIndex=(readIndex+1)%numReadings; unsigned long avg=total/numReadings;
     g_rpm=(float)avg; g_speed_kmh=rpm_to_kmh(g_rpm);
 
-    // Telemetria serial (como antes)
+    // Telemetria
     if(g_printmode==0){
       Serial.print(F("MS:"));    Serial.print(millis());       Serial.print(" ");
       Serial.print(F("V:"));     Serial.print(g_volts,3);      Serial.print(" ");
@@ -573,9 +491,7 @@ void loop(){
       Serial.print(F("OVRPCT:"));Serial.print(g_hold_pct);     Serial.print(" ");
       Serial.print(F("MAXPCT:"));Serial.print((int)G_MAX_PCT); Serial.print("\n");
     }
-
-    // LOG no SD
-    sd_log_line();
+    // Plotter omitido (igual ao anterior) ...
 
     if(g_ramp_delay_ms) delay(g_ramp_delay_ms);
   }

@@ -1,8 +1,14 @@
-// ===== Arduino UNO/Nano — PWM D9 (Timer1) + Rampas + Persistência (EEPROM) =====
+// ===== Arduino MEGA 2560 — motor_controller_mega_v1.ino — PWM D11 (Timer1) + Rampas + Persistência (EEPROM) =====
 // Sensores APENAS medem (telemetria). NÃO influenciam controle neste estágio.
 // Comandos e ACKs, teto de aceleração, rampas configuráveis, telemetria K:V.
 //
-// Pinos: A0=acelerador, A1=RPM(PCINT), A2=Ibat, A3=Imot(opc), D9=PWM, D4=DHT22
+// Pinos (MEGA):
+// A0=acelerador
+// A1=RPM (no UNO era A1, mas no MEGA A1 não tem PCINT -> usamos A8 para RPM)
+// A2=Ibat
+// A3=Imot(opc)
+// D4=DHT22
+// D11=PWM (OC1A no MEGA)
 // Serial @115200
 
 #include <Arduino.h>
@@ -11,17 +17,19 @@
 #include <math.h>
 
 // ---------- Flags de controle (sensores NÃO atuam no controle) ----------
-static const bool USE_TEMP_DERATE  = false; // não usar temperatura para limitar
-static const bool USE_CURR_DERATE  = false; // não usar corrente para limitar
-static const bool USE_STALL_DETECT = false; // não usar detecção de estol
+static const bool USE_TEMP_DERATE  = false;
+static const bool USE_CURR_DERATE  = false;
+static const bool USE_STALL_DETECT = false;
 
 // ---------- Pinos ----------
 const uint8_t PIN_THROTTLE = A0;
-const uint8_t PIN_RPM      = A1;
-const uint8_t PIN_IBAT     = A2;  // ACS712 (bateria)
-const uint8_t PIN_IMOT     = A3;  // ACS712 (motor) opcional
+// NO MEGA: vamos usar A8 para RPM pois tem PCINT (PORTK)
+const uint8_t PIN_RPM      = A8;
+const uint8_t PIN_IBAT     = A2;
+const uint8_t PIN_IMOT     = A3;
 const uint8_t PIN_DHT      = 4;
-const uint8_t PIN_PWM      = 9;
+// NO MEGA: Timer1 OC1A = pino 11
+const uint8_t PIN_PWM      = 11;
 
 #define DHTTYPE DHT22
 DHT dht(PIN_DHT, DHTTYPE);
@@ -38,24 +46,22 @@ const float V_FAULT_LOW  = 0.30f;
 const float V_FAULT_HIGH = 4.90f;
 
 // ---------- Corrente (calib ACS712) ----------
-const float ACS_MV_PER_A = 100.0f; // ajuste ao seu sensor
+const float ACS_MV_PER_A = 100.0f;
 const float ACS_V_OFFSET = 2.5f;
 
 // ---------- Controle / rampas ----------
-volatile bool  g_override = false;  // STOP/HOLD
-volatile int   g_hold_pct = 0;      // duty fixo quando HOLD
-float dutyNowPct = 0.0f;            // duty aplicado
-float dutyTargetPct = 0.0f;         // duty alvo (após caps)
-unsigned long rapidUntilMs = 0;     // janela turbo
+volatile bool  g_override = false;
+volatile int   g_hold_pct = 0;
+float dutyNowPct = 0.0f;
+float dutyTargetPct = 0.0f;
+unsigned long rapidUntilMs = 0;
 
-// Rampas (taxa)
 uint16_t RAPID_RAMP_MS = 250;
 float    RAPID_UP_PCTPS= 150;
 float    SLEW_UP_PCTPS = 40;
 float    SLEW_DN_PCTPS = 60;
 uint8_t  START_MIN_PCT = 8;
 
-// Discretização/soft
 const uint8_t  DEADZONE_PWM        = 4;
 const uint8_t  MIN_START_PWM       = 20;
 const uint8_t  REST_PCT_THRESHOLD  = 2;
@@ -63,7 +69,6 @@ const uint16_t REST_DEBOUNCE_MS    = 120;
 const uint16_t SOFT_RAMP_MS        = 1500;
 const uint16_t ACCEL_RAMP_MS       = 250;
 
-// Estados para soft/accel S
 bool      atRest          = true;
 uint32_t  restSinceMs     = 0;
 bool      softCapActive   = false;
@@ -78,7 +83,7 @@ float     lastPedalPct    = 0.0f;
 int thr_filtered = 0;
 int last_raw_thr = 0;
 
-// ---------- RPM (PCINT em A1) ----------
+// ---------- RPM (PCINT em A8 / PORTK / PCINT16) ----------
 volatile unsigned long LastTimeWeMeasured = 0;
 volatile unsigned long PeriodBetweenPulses = 700000UL;
 volatile unsigned long PeriodAverage = 700000UL;
@@ -113,7 +118,7 @@ float g_current_bat_a=0, g_current_mot_a=0;
 float g_rpm=0, g_speed_kmh=0;
 
 // ---------- Modos ----------
-uint8_t g_printmode = 0;   // 0=KVP, 1=Plotter
+uint8_t g_printmode = 0;
 bool    g_step_mode = false;
 bool    g_accelS_on = true;
 uint16_t g_ramp_delay_ms = 0;
@@ -175,7 +180,7 @@ float read_voltage_throttle(){
   return v_adc;
 }
 
-// Corrente: mediana + IIR + auto-zero (somente leitura/telemetria)
+// Corrente: mediana + IIR + auto-zero
 static float i_zero_bat = 0.0f, i_zero_mot = 0.0f;
 static bool  i_zero_bat_ok=false, i_zero_mot_ok=false;
 
@@ -198,7 +203,7 @@ float read_current_filtered(uint8_t analogPin, float &i_zero, bool &zero_ok){
   return i_corr;
 }
 
-// ---------- Timer1 PWM ----------
+// ---------- Timer1 PWM (igual, só muda o pino) ----------
 void pwm1_set_freq(uint16_t hz){
   hz = constrain(hz,100,8000);
   PWM_FREQ_HZ=hz;
@@ -211,7 +216,7 @@ void pwm1_set_freq(uint16_t hz){
   if(top>65535UL){ top=65535UL; }
 
   TCCR1A=0; TCCR1B=0;
-  TCCR1A|=(1<<WGM11)|(1<<COM1A1);
+  TCCR1A|=(1<<WGM11)|(1<<COM1A1);   // OC1A -> pino 11 no Mega
   TCCR1B|=(1<<WGM12)|(1<<WGM13);
   ICR1=(uint16_t)top; OCR1A=0;
   TCCR1B|=cs_bits;
@@ -266,7 +271,7 @@ void process_line(String line){
   }
   if (head=="SET_ZEROTO"){ unsigned long us=strtoul(rest.c_str(),NULL,10); ZeroTimeout=us; ack("SET_ZEROTO",String(us)); return; }
 
-  // Novos de persistência
+  // Persistência
   if (head=="SAVE"){ saveCfg(); ack("SAVE","OK"); return; }
   if (head=="LOAD_DEFAULTS"){
     V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; pwm1_set_freq(1000);
@@ -274,7 +279,7 @@ void process_line(String line){
     ack("LOAD_DEFAULTS","OK"); return;
   }
 
-  // Novos diretos do ESP
+  // Diretos
   if (head=="SET_MINV"){ V_MIN_REAL=rest.toFloat(); ack("SET_MINV",String(V_MIN_REAL,3)); return; }
   if (head=="SET_MAXV"){ V_MAX_REAL=rest.toFloat(); ack("SET_MAXV",String(V_MAX_REAL,3)); return; }
   if (head=="SET_MAXPCT"){ int x=constrain(rest.toInt(),1,100); G_MAX_PCT=(uint8_t)x; ack("SET_MAXPCT",String(G_MAX_PCT)); return; }
@@ -287,9 +292,10 @@ void process_line(String line){
   if (head=="SET_RPM_MINPULSE"){ unsigned long us=strtoul(rest.c_str(),NULL,10); RPM_MIN_PULSE_US=us; ack("SET_RPM_MINPULSE",String(us)); return; }
 }
 
-// ---------- PCINT ISR ----------
-ISR(PCINT1_vect){
-  uint8_t state=PINC & _BV(PC1);
+// ---------- PCINT ISR para MEGA (PORTK = A8..A15) ----------
+ISR(PCINT2_vect){
+  // A8 = PK0 = PCINT16
+  uint8_t state = PINK & _BV(PK0);
   if(state && !rpm_last_state){
     unsigned long now=micros();
     unsigned long pbp=now-LastTimeWeMeasured;
@@ -316,7 +322,6 @@ void setup(){
 
   // EEPROM
   if (!loadCfg()){
-    // defaults
     V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; PWM_FREQ_HZ=1000;
     RAPID_RAMP_MS=250; RAPID_UP_PCTPS=150; SLEW_UP_PCTPS=40; SLEW_DN_PCTPS=60; START_MIN_PCT=8;
     saveCfg();
@@ -325,9 +330,13 @@ void setup(){
   pwm1_set_freq(PWM_FREQ_HZ);
   pwm1_set_pct(0);
 
+  // RPM em A8 (PORTK)
   pinMode(PIN_RPM, INPUT_PULLUP);
-  rpm_last_state = PINC & _BV(PC1);
-  PCICR|=_BV(PCIE1); PCMSK1|=_BV(PCINT9);
+  rpm_last_state = PINK & _BV(PK0);
+  // habilita PCINT2 (PORTK)
+  PCICR |= _BV(PCIE2);
+  // habilita PCINT16 (PK0 = A8)
+  PCMSK2 |= _BV(PCINT16);
 
   dht.begin();
 
@@ -346,7 +355,6 @@ void loop(){
     else if(c!='\r'){ rx+=c; if(rx.length()>160) rx=""; }
   }
 
-  // Controle + telemetria
   uint32_t now=millis();
   if(now - lastLoop >= LOOP_MS){
     uint32_t dt_ms=now - lastLoop;
@@ -358,7 +366,7 @@ void loop(){
     float pedalPct = fault?0.0f:pct_from_voltage(v);
     g_volts=v; g_pct=pedalPct;
 
-    // Correntes (somente leitura)
+    // Correntes
     g_current_bat_a = read_current_filtered(PIN_IBAT, i_zero_bat, i_zero_bat_ok);
     g_current_mot_a = read_current_filtered(PIN_IMOT, i_zero_mot, i_zero_mot_ok);
 
@@ -370,13 +378,13 @@ void loop(){
       if(!isnan(h)) g_humi=h;
     }
 
-    // Discretização e mínimos
+    // Discretização
     uint8_t pedalDuty8=(uint8_t)lroundf(constrain(pedalPct,0.0f,100.0f)*255.0f/100.0f);
     if(pedalDuty8<DEADZONE_PWM) pedalDuty8=0;
     if(pedalDuty8>0 && pedalDuty8<MIN_START_PWM) pedalDuty8=0;
     float pedalPctAfter=(pedalDuty8*100.0f)/255.0f;
 
-    // Teto (cap) — independente de sensores
+    // Teto
     pedalPctAfter *= ((float)G_MAX_PCT/100.0f);
 
     // Repouso + soft-start
@@ -397,7 +405,7 @@ void loop(){
       if(x>=1.0f) softCapActive=false;
     }
 
-    // Rampa S rápida (só usa variação do pedal, não sensores)
+    // Rampa S
     if(g_accelS_on && !softCapActive){
       if(pedalPctAfter > lastPedalPct + 0.001f){
         accelCapActive=true; accelStartMs=now; accelFromPct=dutyNowPct; accelToPct=pedalPctAfter;
@@ -415,7 +423,7 @@ void loop(){
       if(x>=1.0f) accelCapActive=false;
     }
 
-    // Alvo final (sem sensores no laço)
+    // Alvo final
     if(g_override){ dutyTargetPct=(g_hold_pct>0)?(float)g_hold_pct:0.0f; }
     else {
       float target = max(cappedPct, (pedalPct>0.0f && pedalPct<START_MIN_PCT)?(float)START_MIN_PCT:0.0f);
@@ -491,7 +499,6 @@ void loop(){
       Serial.print(F("OVRPCT:"));Serial.print(g_hold_pct);     Serial.print(" ");
       Serial.print(F("MAXPCT:"));Serial.print((int)G_MAX_PCT); Serial.print("\n");
     }
-    // Plotter omitido (igual ao anterior) ...
 
     if(g_ramp_delay_ms) delay(g_ramp_delay_ms);
   }

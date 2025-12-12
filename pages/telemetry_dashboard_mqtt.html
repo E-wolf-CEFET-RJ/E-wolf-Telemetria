@@ -266,6 +266,11 @@
       </div>
       <div class="controls-row">
         <span class="muted" id="statusLine">Aguardando conexão MQTT…</span>
+            <div class="controls-row muted" id="msgMetaRow">
+        <span>ltima mensagem: <b id="lastMsg">--</b></span>
+        <span style="margin-left:auto">Intervalo mnimo: <b><span id="intervalTxt">--</span> ms</b></span>
+      </div>
+
       </div>
 
       <div class="slider-row">
@@ -470,8 +475,8 @@
 </div>
 
 <script>
-/* ---------- Config padrão ---------- */
-let cfg = {
+/* ---------- Config padro ---------- */
+const DEFAULT_CFG = {
   host: 'broker.mqtt-dashboard.com',
   port: 8000,        // WS sem TLS
   tls: false,        // se true => wss
@@ -483,6 +488,47 @@ let cfg = {
   topicCfg: 'pb/cmd/config',
   IV: 250
 };
+const LS_KEY = 'ewolf_mqtt_cfg_v1';
+let cfg = {...DEFAULT_CFG};
+
+const clampNum = (val, min, max, fallback)=> {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+};
+
+function sanitizeCfg(state){
+  const next = {...DEFAULT_CFG, ...state};
+  next.host = (next.host || DEFAULT_CFG.host).trim() || DEFAULT_CFG.host;
+  next.port = clampNum(next.port, 1, 65535, DEFAULT_CFG.port);
+  next.tls  = !!next.tls;
+  next.path = (next.path || DEFAULT_CFG.path).trim() || DEFAULT_CFG.path;
+  if (!next.path.startsWith('/')) next.path = '/' + next.path;
+  next.cid  = ((next.cid || DEFAULT_CFG.cid).trim() || DEFAULT_CFG.cid)
+    .replace(/\s+/g,'-')
+    .slice(0, 40);
+  next.topicTlm   = (next.topicTlm   || DEFAULT_CFG.topicTlm).trim()   || DEFAULT_CFG.topicTlm;
+  next.topicMotor = (next.topicMotor || DEFAULT_CFG.topicMotor).trim() || DEFAULT_CFG.topicMotor;
+  next.topicThr   = (next.topicThr   || DEFAULT_CFG.topicThr).trim()   || DEFAULT_CFG.topicThr;
+  next.topicCfg   = (next.topicCfg   || DEFAULT_CFG.topicCfg).trim()   || DEFAULT_CFG.topicCfg;
+  next.IV = clampNum(next.IV, 100, 2000, DEFAULT_CFG.IV);
+  return next;
+}
+
+function loadStoredCfg(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) Object.assign(cfg, sanitizeCfg(JSON.parse(raw)));
+  }catch(e){}
+}
+
+function persistCfg(){
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+  }catch(e){}
+}
+
+loadStoredCfg();
 
 (function applyQueryString(){
   const qs = new URLSearchParams(location.search);
@@ -500,6 +546,8 @@ let cfg = {
   if (qs.has('ival'))      cfg.IV        = Number(get('ival', cfg.IV));
 })();
 
+cfg = sanitizeCfg(cfg);
+persistCfg();
 /* ---------- DOM refs ---------- */
 const mqttBadge = document.getElementById('mqttBadge');
 const mqttDot   = document.getElementById('mqttDot');
@@ -520,6 +568,8 @@ const imEl=document.getElementById('imot');
 const irEl=document.getElementById('iratio');
 
 const statusLine=document.getElementById('statusLine');
+const lastMsgEl=document.getElementById('lastMsg');
+const intervalTxt=document.getElementById('intervalTxt');
 const btnStop=document.getElementById('btnStop');
 const btnStart=document.getElementById('btnStart');
 const btnCfg=document.getElementById('btnCfg');
@@ -584,6 +634,8 @@ const topicCfgIn=document.getElementById('topicCfgIn');
 const ivalIn=document.getElementById('ivalIn');
 const btnCloseModal=document.getElementById('btnCloseModal');
 const btnSaveModal=document.getElementById('btnSaveModal');
+
+const updateIntervalLabel = ()=> intervalTxt.textContent = cfg.IV.toString();
 
 /* ---------- buffers para gráficos ---------- */
 const MAXPTS = 120;
@@ -963,6 +1015,7 @@ btnLogIv.onclick    = ()=>{
 };
 
 /* ---------- inicialização ---------- */
+updateIntervalLabel();
 connectMqtt();
 drawSeries('cvV',buf.V,'V');
 drawSeries('cvP',buf.P,'%',0,100);

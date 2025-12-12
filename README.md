@@ -4,31 +4,31 @@ Coleção de firmwares Arduino/ESP8266 utilizados nos protótipos de telemetria 
 
 ## Conteúdo do repositório
 
+### mottor_controller
+
 | Arquivo | Plataforma | Principais recursos |
 |---------|------------|---------------------|
 | `motor_controller_uno_v2.ino` | Arduino Uno/Nano | Controlador PWM no pino D9 com rampas configuráveis, leitura de acelerador, RPM, correntes (Ibat/Imot) e DHT22 para telemetria. Suporta EEPROM para persistência de parâmetros. |
-| `telemetry_hub_esp8266_v3.ino` | ESP8266 (NodeMCU) | Hub de telemetria completo com UI web, ponte serial, MQTT (pub/sub), OTA, mDNS e registro CSV em LittleFS. Integra sensores apenas para monitoramento, sem afetar o controle. |
 | `motor_controller_mega_v2.ino` | Arduino Mega 2560 | Versão para MEGA com PWM no pino D11 (Timer1 OC1A), leitura de acelerador em A0, RPM via PCINT em A8, correntes (Ibat/Imot), DHT22, cálculo de velocidade (wheel/PPR configuráveis) e telemetria em formato chave:valor. Inclui rampas avançadas (soft-start, rampa S, teto de %), modo HOLD e persistência completa de parâmetros na EEPROM.|
-| `motor_controller_mega_v3.ino`  | Arduino Mega 2560 | Evolução do controlador do MEGA acrescentando LOG em microSD via SPI (CS em D10), que cria arquivos `LOGxxx.CSV` e grava periodicamente ms, tensão do acelerador, % de pedal, temperatura, umidade, RPM, velocidade em km/h, correntes Ibat/Imot e duty atual/alvo para análise offline. |
-| `telemetry_hub_esp32c3_v4.ino` | ESP32-C3 SuperMini | Versão com UI Web completa (dashboard + speedo), MQTT pub/sub, OTA, mDNS, logger CSV em LittleFS e BLE UART para telemetria + comandos. Interpreta o protocolo K:V vindo do MEGA e expõe `/data`, `/log/*`, calibração via HTTP, e velocidade em tempo real.                                    |
-| `telemetry_hub_esp32c3_v5.ino` | ESP32-C3 SuperMini | Versão mais enxuta e moderna SEM Web UI, focada em MQTT + BLE + Logging. Inclui controle remoto por BLE/MQTT, override de aceleração, seleção automática da origem do comando (LOCAL/BLE/MQTT), CSV rotativo, OTA, mDNS, e telemetria estendida. Ideal para dashboards externos e apps móveis.  |
-| `telemetry_dashboard_mqtt.html` | Dashboard Web (qualquer navegador moderno) | Interface avançada de telemetria em tempo real via MQTT/WebSocket, sem depender de ESP rodando página própria. Exibe tensão, pedal (%), temperatura, umidade, RPM, velocidade, corrente da bateria/motor e razão Ib/I. Inclui gráficos deslizantes (~120 amostras), controle remoto de aceleração (override), STOP/START, envio de configurações (max_pct, log, etc.) e modal para ajustar host/porta/path TLS/WebSocket do broker. Totalmente responsivo, elegante e independente — ótimo para uso em desktop, tablet ou celular.  |
-
+| `motor_controller_mega_v3.ino`  | Arduino Mega 2560 | Evolução do controlador do MEGA acrescentando LOG em microSD via SPI (CS em D10), que cria arquivos `LOGxxx.CSV` e grava periodicamente ms, tensão do acelerador, % de pedal, temperatura, umidade, RPM, velocidade em km/h, correntes Ibat/Imot e duty atual/alvo para análise offline.|
 ---
-
-
-### Arquivos não mais usados
+### telemetry_hub
 
 | Arquivo | Plataforma | Principais recursos |
 |---------|------------|---------------------|
-| `medidor_aceleracao_online.ino` | ESP8266 (Wemos D1 mini) | Lê o acelerador (Hall, 3 fios) no pino A0, disponibilizando a leitura pela porta serial e por uma página web/JSON. Utiliza WiFiManager para configuração de rede. |
-| `medidor_aceleracao_temperatura_online.ino` | ESP8266 (Wemos D1 mini) | Expande o medidor adicionando sensor DHT (temperatura/umidade) no pino D4, interface web com gráfico e endpoint `/data` em JSON. |
-| `medidor_aceleracao_temperatura_online_pwm.ino` | ESP8266 (Wemos D1 mini) | Adiciona saída PWM no pino D6 para acionamento de motor via MOSFET (ex.: IRLZ44N), mantendo leitura do acelerador e DHT. |
-| `medidor_aceleracao_temperatura_online_pwm_rpm.ino` | ESP8266 (Wemos D1 mini) | Inclui medição de RPM com sensor Hall (D5), persistência de configurações em LittleFS, controles START/STOP via HTTP e visualização detalhada de telemetria (Volts, %, Temp, Humi, RPM, Speed). |
+| `telemetry_hub_esp32c3_v4.ino` | ESP32-C3 SuperMini | Versão com UI Web completa (dashboard + speedo), MQTT pub/sub, OTA, mDNS, logger CSV em LittleFS e BLE UART para telemetria + comandos. Interpreta o protocolo K:V vindo do MEGA e expõe `/data`, `/log/*`, calibração via HTTP, e velocidade em tempo real.                                    |
+| `telemetry_hub_esp32c3_v5.ino` | ESP32-C3 SuperMini | Versão mais enxuta e moderna SEM Web UI, focada em MQTT + BLE + Logging. Inclui controle remoto por BLE/MQTT, override de aceleração, seleção automática da origem do comando (LOCAL/BLE/MQTT), CSV rotativo, OTA, mDNS, e telemetria estendida. Ideal para dashboards externos e apps móveis.  |
+| `telemetry_dashboard_mqtt.html` | Dashboard Web (qualquer navegador moderno) | Interface avançada de telemetria em tempo real via MQTT/WebSocket, sem depender de ESP rodando página própria. Exibe tensão, pedal (%), temperatura, umidade, RPM, velocidade, corrente da bateria/motor e razão Ib/I. Inclui gráficos deslizantes (~120 amostras), controle remoto de aceleração (override), STOP/START, envio de configurações (max_pct, log, etc.) e modal para ajustar host/porta/path TLS/WebSocket do broker. Totalmente responsivo, elegante e independente — ótimo para uso em desktop, tablet ou celular.  |
+---
+
+### pages
+| Arquivo | Plataforma | Principais recursos |
+|---------|------------|---------------------|
+| `telemetry_dashboard_mqtt.html` | Dashboard Web (qualquer navegador moderno) | Interface avançada de telemetria em tempo real via MQTT/WebSocket, sem depender de ESP rodando página própria. Exibe tensão, pedal (%), temperatura, umidade, RPM, velocidade, corrente da bateria/motor e razão Ib/I. Inclui gráficos deslizantes (~120 amostras), controle remoto de aceleração (override), STOP/START, envio de configurações (max_pct, log, etc.) e modal para ajustar host/porta/path TLS/WebSocket do broker. Totalmente responsivo, elegante e independente — ótimo para uso em desktop, tablet ou celular.  |
 
 ## Pré-requisitos
 
-- Arduino IDE (ou PlatformIO) com suporte às placas **ESP8266** e **Arduino AVR** instalado.
+- Arduino IDE (ou PlatformIO) com suporte às placas **ESP8266**, **ESP32** e **Arduino AVR** instalado.
 - Bibliotecas utilizadas (instale via Gerenciador de Bibliotecas da IDE ou `platformio.ini`):
   - `ESP8266WiFi`
   - `ESP8266WebServer`

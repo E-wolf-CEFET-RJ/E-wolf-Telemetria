@@ -1,25 +1,24 @@
-// ===== ESP32-C3 SuperMini — telemetry_hub_esp32c3_v4_ble.ino =====
-// Hub de telemetria + UI Web + MQTT + OTA + mDNS + Logger CSV + BLE UART.
-// Sensores só em telemetria; o Arduino MEGA controla PWM/motor.
-// BLE: envia telemetria básica (speed/temp/corrente) e recebe comandos (HOLD / START / STOP).
+// ===== ESP8266 NodeMCU telemetry_hub_esp8266_v1.ino — Web/UI + Serial Bridge + MQTT + OTA/mDNS + CSV Logging =====
+// Sensores só em telemetria; Arduino não usa para controle nesse estágio.
+// UI: campos de MIN/MAX (com botões também), Poll (ms), teto de aceleração (%), botões de log CSV.
+// MQTT: publica pb/telemetry/json; assina pb/cmd/motor (0=STOP,1=START); LWT em pb/status.
+// mDNS: telemetry.local  | OTA: senha "espota" (troque!).
 
-// ---------------------------- INCLUDES ----------------------------
-#include <WiFi.h>
-#include <WebServer.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <FS.h>
 #include <LittleFS.h>
 #include <PubSubClient.h>
-#include <ESPmDNS.h>
+#include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <time.h>
-#include <NimBLEDevice.h>
 
-// ---------------------------- MQTT ----------------------------
+// ---------- MQTT ----------
 const char* MQTT_HOST = "broker.mqtt-dashboard.com";
 const uint16_t MQTT_PORT = 1883;
-const char* MQTT_ID_BASE = "EWolfTelemetryC3";
+const char* MQTT_ID_BASE = "JONASgostoso";
 const char* TOP_TLM_JSON = "pb/telemetry/json";
 const char* TOP_CMD_MOTOR = "pb/cmd/motor";   // 0 = STOP, 1 = START
 const char* TOP_STATUS   = "pb/status";       // online/offline
@@ -29,10 +28,10 @@ PubSubClient mqtt(espClient);
 unsigned long lastMqtt = 0;
 const unsigned long MQTT_IV_MS = 1000;
 
-// ---------------------------- HTTP ----------------------------
-WebServer server(80);
+// ---------- HTTP ----------
+ESP8266WebServer server(80);
 
-// ---------------------------- Estado (recebido do Arduino) --------------------
+// ---------- Estado (recebido do Arduino) ----------
 volatile float g_volts=0, g_pct=0, g_temp=NAN, g_humi=NAN;
 volatile float g_rpm=0, g_speed_kmh=0;
 volatile float g_min_v=0.80f, g_max_v=4.20f;
@@ -52,17 +51,12 @@ String sensLine;           // buffer da linha K:V
 String lastAck;            // último ACK:* recebido
 unsigned long lastAckMs=0; // timestamp do ACK
 
-// ---------------------------- Logging CSV no LittleFS -------------------------
-static const char* LOG_PATH     = "/telemetry.csv";
+// ---------- Logging CSV no LittleFS ----------
+static const char* LOG_PATH = "/telemetry.csv";
 static const char* LOG_PATH_OLD = "/telemetry.csv.1";
 bool     log_enabled = false;
 uint32_t LOG_IV_MS = 1000;
 unsigned long lastLog = 0;
-
-// -------- BLE UART characteristics globais --------
-static NimBLECharacteristic* bleTxChar = nullptr; // ESP32 -> celular (notify)
-static NimBLECharacteristic* bleRxChar = nullptr; // celular -> ESP32 (write)
-
 
 // ================= HTML principal ===================
 const char PAGE_HTML[] PROGMEM = R"HTML(
@@ -93,13 +87,16 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
     .metric{background:var(--panel);border-radius:12px;padding:12px}
     .metric h2{margin:0 0 6px;font-size:13px;color:var(--muted)}
     .val{font-size:28px;font-weight:800}
-    @media (max-width:800px){ .grid-metrics{grid-template-columns:1fr} }
+    .canvas-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .chart{background:var(--panel);border-radius:12px;padding:8px}
+    canvas{width:100%;height:260px;display:block}
+    @media (max-width:800px){ .canvas-grid{grid-template-columns:1fr} .grid-metrics{grid-template-columns:1fr} }
   </style>
 </head>
 <body>
 <div class="wrap">
   <div class="card">
-    <h1>Arduino Telemetry → ESP32-C3 Web + MQTT + BLE
+    <h1>Arduino Telemetry → ESP Web + MQTT
       <span id="motorBadge" class="badge">motor: ?</span>
       <span id="ackBadge" class="badge">ack: —</span>
     </h1>
@@ -114,6 +111,11 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       <div class="metric"><h2>Velocidade (km/h)</h2><div class="val" id="spd">--</div></div>
       <div class="metric"><h2>Ibateria (A)</h2><div class="val" id="ibat">--</div></div>
       <div class="metric"><h2>Imotor (A)</h2><div class="val" id="imot">--</div></div>
+      <div class="metric" style="grid-column:1/-1">
+        <h2>Relação Ibateria/Imotor</h2>
+        <div class="val" id="iratio">--</div>
+        <div class="muted">Quanto a corrente da bateria difere da do motor (perdas/inversor).</div>
+      </div>
     </div>
 
     <!-- Grupo 1: Acelerador -->
@@ -130,7 +132,16 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- Grupo 2: Motor & Controles -->
+    <!-- Grupo 2: Roda & RPM -->
+    <div class="section">
+      <h3>Roda e sensor de RPM</h3>
+      <div class="controls">
+        <div class="kv"><label>Diâmetro roda (cm):</label><input id="wheel" type="number" min="0.5" step="0.1" value="50.8" style="width:110px"><button id="applyWheel">Aplicar</button></div>
+        <div class="kv"><label>Pulsos por volta (PPR):</label><input id="ppr" type="number" min="1" step="1" value="1" style="width:90px"><button id="applyPpr">Aplicar</button></div>
+      </div>
+    </div>
+
+    <!-- Grupo 3: Motor & Controles -->
     <div class="section">
       <h3>Motor e controles</h3>
       <div class="controls">
@@ -141,16 +152,16 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
-    <!-- Exibição -->
+    <!-- Grupo 4: Exibição -->
     <div class="section">
       <h3>Exibição e atualização</h3>
       <div class="controls">
-        <div class="kv"><label>Poll (ms):</label><input id="pollms" type="number" min="100" step="50" value="1000" style="width:110px"><button id="applyPoll">Aplicar</button></div>
+        <div class="kv"><label>Poll gráficos (ms):</label><input id="pollms" type="number" min="100" step="50" value="1000" style="width:110px"><button id="applyPoll">Aplicar</button></div>
         <a href="/speedo" style="text-decoration:none;margin-left:auto"><button>🔭 Abrir velocímetro (tela cheia)</button></a>
       </div>
     </div>
 
-    <!-- CSV Logger (no ESP) -->
+    <!-- Grupo 5: CSV Logger (no ESP) -->
     <div class="section">
       <h3>CSV Logger (no ESP)</h3>
       <div class="controls">
@@ -163,69 +174,260 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       </div>
     </div>
 
+    <!-- Gráficos -->
+    <div class="section">
+      <h3>Gráficos</h3>
+      <div class="canvas-grid">
+        <div class="chart"><h2>Volts</h2><canvas id="cvV"></canvas></div>
+        <div class="chart"><h2>Pct (%)</h2><canvas id="cvP"></canvas></div>
+        <div class="chart"><h2>Temp (°C)</h2><canvas id="cvT"></canvas></div>
+        <div class="chart"><h2>Humi (%)</h2><canvas id="cvH"></canvas></div>
+        <div class="chart"><h2>RPM</h2><canvas id="cvR"></canvas></div>
+        <div class="chart"><h2>Speed (km/h)</h2><canvas id="cvS"></canvas></div>
+        <div class="chart"><h2>Ibateria (A)</h2><canvas id="cvIB"></canvas></div>
+        <div class="chart"><h2>Imotor (A)</h2><canvas id="cvIM"></canvas></div>
+        <div class="chart"><h2>Ib/Im (adim.)</h2><canvas id="cvIR"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Parâmetros Arduino -->
+    <div class="section">
+      <h3>Parâmetros de rampa / PWM (Arduino)</h3>
+      <div class="controls">
+        <label>PWM (Hz): <input id="pwmf" type="number" min="100" max="8000" step="50" value="1000" style="width:100px"></label>
+        <button id="applyPwmf">Aplicar</button>
+        <label>Start mín (%): <input id="startmin" type="number" min="0" max="40" step="1" value="8" style="width:80px"></label>
+        <button id="applyStartMin">Aplicar</button>
+      </div>
+      <div class="controls">
+        <label>Rampa rápida (ms): <input id="rapidms" type="number" min="50" max="1500" step="10" value="250" style="width:100px"></label>
+        <label>RapUp (pct/s): <input id="rapup" type="number" min="10" max="400" step="5" value="150" style="width:90px"></label>
+        <button id="applyRapid">Aplicar</button>
+      </div>
+      <div class="controls">
+        <label>Slew UP (pct/s): <input id="slewup" type="number" min="5" max="200" step="5" value="40" style="width:90px"></label>
+        <label>Slew DN (pct/s): <input id="slewdn" type="number" min="5" max="300" step="5" value="60" style="width:90px"></label>
+        <button id="applySlew">Aplicar</button>
+      </div>
+      <div class="controls">
+        <label>ZeroTimeout RPM (ms): <input id="zeroms" type="number" min="50" max="2000" step="10" value="600" style="width:100px"></label>
+        <button id="applyZero">Aplicar</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
 <script>
+/* --------- refs DOM --------- */
 const statusEl=document.getElementById('status');
 const vEl=document.getElementById('v'), pEl=document.getElementById('p'),
       tEl=document.getElementById('t'), hEl=document.getElementById('h'),
       rpmEl=document.getElementById('rpm'), spdEl=document.getElementById('spd');
-const ibEl=document.getElementById('ibat'), imEl=document.getElementById('imot');
+const ibEl=document.getElementById('ibat'), imEl=document.getElementById('imot'), irEl=document.getElementById('iratio');
 const minEl=document.getElementById('minv'), maxEl=document.getElementById('maxv');
+const wheelIn=document.getElementById('wheel'), pprIn=document.getElementById('ppr');
+const holdIn=document.getElementById('hold');
+const stopBtn=document.getElementById('stopBtn');
+const startBtn=document.getElementById('startBtn');
+const applyHold=document.getElementById('applyHold');
+const badge=document.getElementById('motorBadge');
+const ackBadge=document.getElementById('ackBadge');
+
+const pwmf=document.getElementById('pwmf');
+const startmin=document.getElementById('startmin');
+const rapidms=document.getElementById('rapidms');
+const rapup=document.getElementById('rapup');
+const slewup=document.getElementById('slewup');
+const slewdn=document.getElementById('slewdn');
+const zeroms=document.getElementById('zeroms');
+
+const minIn=document.getElementById('minIn');
+const maxIn=document.getElementById('maxIn');
 const pollIn=document.getElementById('pollms');
 const maxpctIn=document.getElementById('maxpct');
 const logiv=document.getElementById('logiv');
 const logstatus=document.getElementById('logstatus');
-const holdIn=document.getElementById('hold');
 
-let POLL_MS=1000;
+/* --------- estado UI --------- */
+let POLL_MS=1000, filledOnce=false;
+const MAXPTS=120;
+const buf = { V:[], P:[], T:[], H:[], R:[], S:[], IB:[], IM:[], IR:[] };
 
+/* --------- helpers: não sobrescrever inputs em edição --------- */
+function isIdle(el){ return document.activeElement !== el && !el.dataset.editing; }
+function setIfIdle(el, v){ if(isIdle(el)) el.value = v; }
+[minIn,maxIn,pollIn,maxpctIn,wheelIn,pprIn,logiv].forEach(el=>{
+  el.addEventListener('focus',()=>el.dataset.editing='1');
+  el.addEventListener('blur', ()=>delete el.dataset.editing);
+});
+
+/* --------- gráficos --------- */
+function pushBuf(a,val){ a.push(val); if(a.length>MAXPTS) a.shift(); }
+function drawSeries(canvasId, data, yLabel, minY=null, maxY=null){
+  const cv=document.getElementById(canvasId), ctx=cv.getContext('2d');
+  const W=cv.width=cv.clientWidth, H=cv.height=cv.clientHeight;
+  const padL=42, padB=24, padT=10, padR=8;
+  ctx.fillStyle="#0f1116"; ctx.fillRect(0,0,W,H);
+  const clean=data.filter(x=>x!=null && !Number.isNaN(x));
+  if(clean.length<2){ ctx.fillStyle="#aaa"; ctx.fillText("Sem dados", W/2-30, H/2); return; }
+  let dmin=(minY!==null)?minY:Math.min(...clean);
+  let dmax=(maxY!==null)?maxY:Math.max(...clean);
+  if(dmin===dmax){ dmin-=1; dmax+=1; }
+  ctx.strokeStyle="#222"; ctx.lineWidth=1;
+  const ticks=5;
+  for(let i=0;i<=ticks;i++){ const y=padT+(H-padT-padB)*i/ticks; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); }
+  ctx.strokeStyle="#333"; ctx.strokeRect(padL,padT,W-padL-padR,H-padT-padB);
+  ctx.fillStyle="#9aa4b2"; ctx.font="12px system-ui";
+  for(let i=0;i<=ticks;i++){ const val=dmax-(dmax-dmin)*i/ticks; const y=padT+(H-padT-padB)*i/ticks+4; ctx.fillText(val.toFixed((Math.abs(dmax-dmin)<5)?2:1),4,y); }
+  ctx.fillText(yLabel,4,padT+12);
+  ctx.strokeStyle="#7aa2f7"; ctx.lineWidth=2; ctx.beginPath();
+  const n=data.length;
+  for(let i=0;i<n;i++){
+    const v=data[i]; if(v==null||Number.isNaN(v)) continue;
+    const x=padL+(W-padL-padR)*i/(MAXPTS-1);
+    const y=padT+(H-padT-padB)*(1-(v-dmin)/(dmax-dmin));
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+}
+
+/* --------- loop principal --------- */
 async function tick(){
   try{
-    const r=await fetch('/data',{cache:'no-store'});
+    const r=await fetch('/data',{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
-    vEl.textContent=d.volts.toFixed(3);
-    pEl.textContent=d.pct.toFixed(1);
-    tEl.textContent=(d.temp==null)?'--':d.temp.toFixed(1);
-    hEl.textContent=(d.humi==null)?'--':d.humi.toFixed(1);
-    rpmEl.textContent=d.rpm.toFixed(1);
-    spdEl.textContent=d.speed_kmh.toFixed(2);
-    ibEl.textContent=d.current_bat_a.toFixed(2);
-    imEl.textContent=d.current_mot_a.toFixed(2);
-    minEl.textContent=d.min.toFixed(3);
-    maxEl.textContent=d.max.toFixed(3);
-    POLL_MS=d.poll_ms||POLL_MS;
-    pollIn.value=POLL_MS;
-    maxpctIn.value=d.max_pct||100;
-    logstatus.textContent=(d.log_enabled?'ON':'OFF')+' • '+(d.log_size||0)+' bytes @ '+(d.log_iv_ms||0)+' ms';
-    if(d.log_iv_ms) logiv.value=d.log_iv_ms;
-    document.getElementById('motorBadge').textContent = d.override ? 'motor: OFF' : 'motor: ON';
+
+    const volts=Number(d.volts);
+    const pct=Number(d.pct);
+    const temp=(d.temp==null)?null:Number(d.temp);
+    const humi=(d.humi==null)?null:Number(d.humi);
+    const rpm=(d.rpm==null)?null:Number(d.rpm);
+    const spd=(d.speed_kmh==null)?null:Number(d.speed_kmh);
+    const ib =(d.current_bat_a==null)?null:Number(d.current_bat_a);
+    const im =(d.current_mot_a==null)?null:Number(d.current_mot_a);
+    const ratio=(ib!=null && im!=null && !isNaN(ib) && !isNaN(im) && Math.abs(im)>1e-6)?(ib/im):null;
+    const motor_on = d.override ? 0 : 1;
+
+    if(!Number.isNaN(volts)) vEl.textContent=volts.toFixed(3);
+    if(!Number.isNaN(pct))   pEl.textContent=pct.toFixed(1);
+    tEl.textContent=(temp==null)?'--':temp.toFixed(1);
+    hEl.textContent=(humi==null)?'--':humi.toFixed(1);
+    rpmEl.textContent=(rpm==null||Number.isNaN(rpm))?'--':rpm.toFixed(1);
+    spdEl.textContent=(spd==null||Number.isNaN(spd))?'--':spd.toFixed(2);
+
+    ibEl.textContent=(ib==null||Number.isNaN(ib))?'--':ib.toFixed(2);
+    imEl.textContent=(im==null||Number.isNaN(im))?'--':im.toFixed(2);
+    irEl.textContent=(ratio==null)?'--':ratio.toFixed(2);
+
+    if(typeof d.min==='number'){ minEl.textContent=d.min.toFixed(3); setIfIdle(minIn,d.min.toFixed(3)); }
+    if(typeof d.max==='number'){ maxEl.textContent=d.max.toFixed(3); setIfIdle(maxIn,d.max.toFixed(3)); }
+    if(typeof d.poll_ms==='number'){ POLL_MS=d.poll_ms; setIfIdle(pollIn,POLL_MS); }
+    if(typeof d.max_pct==='number'){ setIfIdle(maxpctIn,d.max_pct); }
+
+    if(typeof d.log_enabled!=='undefined'){
+      const sz=d.log_size||0, iv=d.log_iv_ms||0;
+      logstatus.textContent=(d.log_enabled?'ON':'OFF')+' • '+sz+' bytes @ '+iv+' ms';
+      if(d.log_iv_ms) setIfIdle(logiv,d.log_iv_ms);
+    }
+
+    if(!filledOnce){
+      if(typeof d.wheel_cm==='number') setIfIdle(wheelIn,d.wheel_cm.toFixed(1));
+      if(typeof d.ppr==='number') setIfIdle(pprIn,String(d.ppr));
+      filledOnce=true;
+    }
+
+    pushBuf(buf.V, Number.isNaN(volts)?null:volts);
+    pushBuf(buf.P, Number.isNaN(pct)?null:pct);
+    pushBuf(buf.T, temp); pushBuf(buf.H, humi);
+    pushBuf(buf.R, rpm);  pushBuf(buf.S, spd);
+    pushBuf(buf.IB, ib);  pushBuf(buf.IM, im); pushBuf(buf.IR, ratio);
+
+    drawSeries('cvV',buf.V,'V');
+    drawSeries('cvP',buf.P,'%',0,100);
+    drawSeries('cvT',buf.T,'°C');
+    drawSeries('cvH',buf.H,'%',0,100);
+    drawSeries('cvR',buf.R,'RPM');
+    drawSeries('cvS',buf.S,'km/h');
+    drawSeries('cvIB',buf.IB,'A');
+    drawSeries('cvIM',buf.IM,'A');
+    drawSeries('cvIR',buf.IR,'Ib/Im');
+
+    document.getElementById('motorBadge').textContent = motor_on ? 'motor: ON' : 'motor: OFF';
     const ack=(d.ack||'').trim(); document.getElementById('ackBadge').textContent='ack: '+(ack?ack:'—');
     statusEl.textContent='status: ok';
-  }catch(e){
-    statusEl.textContent='status: ERRO '+e.message;
-  }
-  setTimeout(tick,POLL_MS);
+  }catch(e){ statusEl.textContent='status: ERRO '+e.message; }
+  setTimeout(tick, POLL_MS);
 }
 tick();
 
-// Controles simples
-document.getElementById('setMin').onclick=()=>{ fetch('/min_now'); };
-document.getElementById('setMax').onclick=()=>{ fetch('/max_now'); };
-document.getElementById('resetMM').onclick=()=>{ fetch('/defaults'); };
-document.getElementById('applyMin').onclick=()=>{ const v=parseFloat(minEl.textContent||'0'); fetch('/set_min?v='+v.toFixed(3)); };
-document.getElementById('applyMax').onclick=()=>{ const v=parseFloat(maxEl.textContent||'0'); fetch('/set_max?v='+v.toFixed(3)); };
-document.getElementById('stopBtn').onclick=()=>{ fetch('/stop'); };
-document.getElementById('startBtn').onclick=()=>{ fetch('/start'); };
-document.getElementById('applyHold').onclick=()=>{ const n=Math.max(0,Math.min(100,parseInt(holdIn.value||'0',10))); fetch('/hold_pct?x='+n); };
-document.getElementById('applyPoll').onclick=()=>{ const ms=parseInt(pollIn.value||'1000',10); fetch('/set_pollms?ms='+ms); };
-document.getElementById('applyMaxPct').onclick=()=>{ const x=Math.max(1,Math.min(100,parseInt(maxpctIn.value||'100',10))); fetch('/set_maxpct?x='+x); };
+/* --------- endpoints --------- */
+document.getElementById('setMin').onclick=async()=>{ try{ await fetch('/min_now'); }catch(_){ } };
+document.getElementById('setMax').onclick=async()=>{ try{ await fetch('/max_now'); }catch(_){ } };
+document.getElementById('resetMM').onclick=async()=>{ try{ await fetch('/defaults'); }catch(_){ } };
+
+document.getElementById('applyMin').onclick=async()=>{
+  const v=parseFloat(minIn.value||"0");
+  try{ await fetch('/set_min?v='+encodeURIComponent(v.toFixed(3))); }catch(_){}
+};
+document.getElementById('applyMax').onclick=async()=>{
+  const v=parseFloat(maxIn.value||"0");
+  try{ await fetch('/set_max?v='+encodeURIComponent(v.toFixed(3))); }catch(_){}
+};
+
+document.getElementById('applyWheel').onclick=async()=>{
+  const cm=parseFloat(wheelIn.value||"50.8");
+  try{ await fetch('/set_wheel?cm='+encodeURIComponent(cm)); }catch(_){}
+};
+document.getElementById('applyPpr').onclick=async()=>{
+  const n=parseInt(pprIn.value||"1",10);
+  try{ await fetch('/set_ppr?n='+encodeURIComponent(n)); }catch(_){}
+};
+
+stopBtn.onclick=async()=>{ try{ await fetch('/stop'); }catch(_){ } };
+startBtn.onclick=async()=>{ try{ await fetch('/start'); }catch(_){ } };
+applyHold.onclick=async()=>{
+  const n=Math.max(0,Math.min(100,parseInt(holdIn.value||"0",10)));
+  try{ await fetch('/hold_pct?x='+encodeURIComponent(n)); }catch(_){}
+};
+
+document.getElementById('applyPoll').onclick=async()=>{
+  const ms=parseInt(pollIn.value||"1000",10);
+  try{ await fetch('/set_pollms?ms='+encodeURIComponent(ms)); }catch(_){}
+};
+document.getElementById('applyMaxPct').onclick=async()=>{
+  const x=Math.max(1,Math.min(100,parseInt(maxpctIn.value||"100",10)));
+  try{ await fetch('/set_maxpct?x='+encodeURIComponent(x)); }catch(_){}
+};
+
+document.getElementById('applyPwmf').onclick=async()=>{
+  const hz=Math.max(100,Math.min(8000,parseInt(pwmf.value||"1000",10)));
+  try{ await fetch('/set_pwmf?hz='+hz); }catch(_){}
+};
+document.getElementById('applyStartMin').onclick=async()=>{
+  const x=Math.max(0,Math.min(40,parseInt(startmin.value||"8",10)));
+  try{ await fetch('/set_startmin?x='+x); }catch(_){}
+};
+document.getElementById('applyRapid').onclick=async()=>{
+  const ms=Math.max(50,Math.min(1500,parseInt(rapidms.value||"250",10)));
+  const up=Math.max(10,Math.min(400,parseInt(rapup.value||"150",10)));
+  try{ await fetch('/set_rapid?ms='+ms+'&up='+up); }catch(_){}
+};
+document.getElementById('applySlew').onclick=async()=>{
+  const up=Math.max(5,Math.min(200,parseInt(slewup.value||"40",10)));
+  const dn=Math.max(5,Math.min(300,parseInt(slewdn.value||"60",10)));
+  try{ await fetch('/set_slew?up='+up+'&down='+dn); }catch(_){}
+};
+document.getElementById('applyZero').onclick=async()=>{
+  const ms=Math.max(50,Math.min(2000,parseInt(zeroms.value||"600",10)));
+  try{ await fetch('/set_zeroto?ms='+ms); }catch(_){}
+};
 </script>
 </body>
 </html>)HTML";
 
-// ---------------- /speedo (versão BLE-friendly) ----------------
+
+// ---------------- /speedo (igual com pequenos ajustes) ----------------
 const char SPEEDO_HTML[] PROGMEM = R"HTML(
 <!doctype html><html><head>
 <meta charset="utf-8"/>
@@ -239,24 +441,57 @@ const char SPEEDO_HTML[] PROGMEM = R"HTML(
          box-shadow:0 10px 30px rgba(0,0,0,.35);position:relative;overflow:hidden}
   canvas{width:100%;height:100%}
   .topbar{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:center;pointer-events:none;z-index:3}
-  .pill{pointer-events:auto;background:#0f1116;border:1px solid #2a2f3a;border-radius:999px;padding:4px 10px;color:#9aa2b2;font-size:12px}
+  .fab{pointer-events:auto;width:48px;height:48px;border-radius:999px;border:1px solid #2a2f3a;
+       background:#0f1116;color:#eaeaea;display:flex;align-items:center;justify-content:center;
+       font-size:20px;box-shadow:0 8px 24px rgba(0,0,0,.3);user-select:none}
+  .midpill{pointer-events:none;background:#0f1116;border:1px solid #2a2f3a;border-radius:999px;padding:6px 12px;color:#9aa2b2;font-size:14px}
   .readout{position:absolute;left:0;right:0;bottom:10%;text-align:center;pointer-events:none;z-index:2}
   .v{font-size:clamp(56px,14vw,140px);font-weight:900;letter-spacing:.5px}
   .unit{font-size:clamp(14px,3.6vw,26px);color:var(--muted)}
+  .edge{position:fixed;top:50%;transform:translateY(-50%);z-index:1}
+  .edge .pill{background:#0f1116;border:1px solid #2a2f3a;border-radius:14px;padding:10px 14px;
+              color:#cfd6df;font-weight:700;font-size:clamp(14px,2.8vw,24px);white-space:nowrap}
+  #edgeL{left:10px}
+  #edgeR{right:10px}
+  .warnTxt{color:#f7d27a} .alarmTxt{color:#ff5b5b}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:4}
+  .card{background:#12151c;border:1px solid #2a2f3a;border-radius:16px;padding:16px;min-width:min(92vw,440px)}
+  .row{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:10px 0}
+  input[type=number]{width:120px;background:#0f1116;color:#eaeaea;border:1px solid #2a2f3a;border-radius:10px;padding:8px}
+  .btn{background:#0f1116;color:#eaeaea;border:1px solid #2a2f3a;border-radius:10px;padding:8px 12px}
+  label{color:#97a0ab}
+  @media (max-width:720px){ .edge{display:none;} }
 </style></head><body>
 <div class="wrap">
+  <div id="edgeL" class="edge"><span class="pill">Temp: <span id="tempVal">--</span> °C</span></div>
+  <div id="edgeR" class="edge"><span class="pill">Corrente: <span id="currVal">--</span> A</span></div>
   <div class="gauge">
     <div class="topbar">
-      <span class="pill" id="status">MAX: <span id="maxLbl">60</span> km/h</span>
-      <span class="pill">Origem: HTTP/BLE</span>
+      <button id="btnFs" class="fab" title="Tela cheia">⛶</button>
+      <span class="midpill" id="status">MAX: <span id="maxLbl">60</span> km/h</span>
+      <button id="btnCfg" class="fab" title="Configurações">⚙</button>
     </div>
     <canvas id="cv"></canvas>
     <div class="readout"><div class="v" id="speed">--</div><div class="unit">km/h</div></div>
   </div>
 </div>
+
+<div id="modal" class="modal">
+  <div class="card">
+    <h3 style="margin:0 0 10px 0">Ajustes</h3>
+    <div class="row"><label>Máximo (km/h):</label><input id="maxIn" type="number" min="10" max="300" step="5" value="60"></div>
+    <div class="row"><label>Atualização (ms):</label><input id="ivalIn" type="number" min="100" max="2000" step="50" value="250"></div>
+    <div class="row"><label>Alarme de temperatura (°C):</label><input id="tAlarmIn" type="number" min="20" max="120" step="1" value="70"></div>
+    <div class="row"><label>Som do alarme:</label><input id="beepChk" type="checkbox" checked></div>
+    <div class="row" style="justify-content:flex-end"><button id="closeBtn" class="btn">Fechar</button><button id="saveBtn" class="btn">Salvar</button></div>
+  </div>
+</div>
+
 <script>
-let MAX = 60;
-let IV  = 250;
+let MAX = Number(localStorage.getItem('max_kmh')||60);
+let IV  = Number(localStorage.getItem('ival_ms')||250);
+let T_ALARM = Number(localStorage.getItem('t_alarm_c')||70);
+let BEEP_ON = (localStorage.getItem('beep_on')!=='0');
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 function resize(){ cv.width=cv.clientWidth*2; cv.height=cv.clientHeight*2; }
@@ -274,35 +509,76 @@ function arcGauge(val,max){
 }
 
 const speedEl=document.getElementById('speed');
+const tempEl=document.getElementById('tempVal');
+const currEl=document.getElementById('currVal');
 const statusMid=document.getElementById('status');
 const maxLbl=document.getElementById('maxLbl');
 
-function updateFromData(spd){
-  spd = Number(spd)||0;
-  speedEl.textContent = spd.toFixed(1);
-  arcGauge(spd,MAX);
+let audioCtx=null;
+function toneOnce(freq=1550, gain=0.6, dur=0.35){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type='square'; o.frequency.value=freq;
+    const t0=audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(gain,t0+0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(); o.stop(t0+dur+0.02);
+  }catch(e){}
 }
 
 async function tick(){
   try{
     const r=await fetch('/data',{cache:'no-store'});
     const d=await r.json();
-    updateFromData(d.speed_kmh);
-    statusMid.textContent = 'MAX: '+MAX+' km/h';
-  }catch(e){
-    statusMid.textContent='conectando…';
-  }
-  setTimeout(tick,IV);
+    const spd = Number(d.speed_kmh)||0;
+    const t   = (d.temp==null)?NaN:Number(d.temp);
+    const ia  = (d.current_bat_a==null)?NaN:Number(d.current_bat_a);
+
+    speedEl.textContent = spd.toFixed(1);
+    arcGauge(spd, MAX);
+    tempEl.textContent = isNaN(t)?'--':t.toFixed(1);
+
+    currEl.textContent = isNaN(ia)?'--':ia.toFixed(2);
+    statusMid.textContent = 'MAX: '+MAX+' km/h'; maxLbl.textContent = MAX;
+  }catch(e){ statusMid.textContent = 'conectando…'; }
+  setTimeout(tick, IV);
 }
 tick();
+
+document.getElementById('btnFs').onclick=()=>{
+  const root=document.documentElement;
+  if(!document.fullscreenElement) (root.requestFullscreen?root.requestFullscreen():root.webkitRequestFullscreen&&root.webkitRequestFullscreen());
+  else (document.exitFullscreen?document.exitFullscreen():document.webkitExitFullscreen&&document.webkitExitFullscreen());
+};
+const modal=document.getElementById('modal');
+const maxIn=document.getElementById('maxIn');
+const ivalIn=document.getElementById('ivalIn');
+const tAlarmIn=document.getElementById('tAlarmIn');
+const beepChk=document.getElementById('beepChk');
+document.getElementById('btnCfg').onclick=()=>{ maxIn.value=MAX; ivalIn.value=IV; tAlarmIn.value=T_ALARM; beepChk.checked=BEEP_ON; modal.style.display='flex'; };
+document.getElementById('closeBtn').onclick=()=>{ modal.style.display='none'; };
+document.getElementById('saveBtn').onclick=()=>{
+  MAX=Math.max(10,Math.min(300,Number(maxIn.value)||60));
+  IV=Math.max(100,Math.min(2000,Number(ivalIn.value)||250));
+  T_ALARM=Math.max(20,Math.min(120,Number(tAlarmIn.value)||70));
+  BEEP_ON=!!beepChk.checked;
+  localStorage.setItem('max_kmh',MAX);
+  localStorage.setItem('ival_ms',IV);
+  localStorage.setItem('t_alarm_c',T_ALARM);
+  localStorage.setItem('beep_on',BEEP_ON?'1':'0');
+  modal.style.display='none';
+};
 </script>
 </body></html>
 )HTML";
 
-// ---------------------------- Util Serial → Arduino ---------------------------
+// ---------- Util ----------
 void sendCmd(const String& s){ Serial.println(s); }
 
-// ---------------------------- Time/NTP ---------------------------------------
+// Time/NTP
 void setupTime() {
   configTime(0, 0, "pool.ntp.org", "time.google.com");
 }
@@ -315,7 +591,7 @@ String isoTimestamp() {
   return String(buf);
 }
 
-// ---------------------------- LittleFS helpers -------------------------------
+// LittleFS helpers
 bool fileExistsNonEmpty(const char* path) {
   if (!LittleFS.exists(path)) return false;
   File f = LittleFS.open(path, "r"); if (!f) return false;
@@ -374,7 +650,7 @@ void appendCsvRow() {
   f.close();
 }
 
-// ---------------------------- HTTP Handlers ----------------------------------
+// ---------- HTTP Handlers ----------
 void handleRoot(){ server.send_P(200, "text/html; charset=utf-8", PAGE_HTML); }
 void handleSpeedo(){ server.send_P(200, "text/html; charset=utf-8", SPEEDO_HTML); }
 
@@ -405,7 +681,6 @@ void handleData(){
   server.send(200, "application/json", s);
 }
 
-// comandos que só repassam pro Arduino
 void handleMinNow(){ sendCmd(F("SET_MIN_NOW")); server.send(200, "text/plain", "OK"); }
 void handleMaxNow(){ sendCmd(F("SET_MAX_NOW")); server.send(200, "text/plain", "OK"); }
 void handleDefaults(){ sendCmd(F("DEFAULTS"));  server.send(200, "text/plain", "OK"); }
@@ -512,7 +787,7 @@ void handleSetLogIv(){
   server.send(200, "text/plain", "OK");
 }
 
-// ---------------------------- MQTT -------------------------------------------
+// ---------- MQTT ----------
 void mqttCallback(char* topic, byte* payload, unsigned int length){
   if (String(topic) == TOP_CMD_MOTOR){
     char c=0; for (unsigned int i=0;i<length;i++){ if(!isspace(payload[i])){ c=(char)payload[i]; break; } }
@@ -531,7 +806,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length){
 void ensureMqtt(){
   if (mqtt.connected()) return;
   while (!mqtt.connected()){
-    String cid = String(MQTT_ID_BASE) + "-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    String cid = String(MQTT_ID_BASE) + "-" + String(ESP.getChipId(), HEX);
     if (mqtt.connect(cid.c_str(), TOP_STATUS, 0, true, "offline")){
       mqtt.publish(TOP_STATUS, "online", true);
       mqtt.subscribe(TOP_CMD_MOTOR);
@@ -563,116 +838,19 @@ void mqttPublishTelemetry(){
   mqtt.publish(TOP_TLM_JSON, j.c_str(), false);
 }
 
-// ---------------------------- OTA + mDNS -------------------------------------
+// ---------- OTA + mDNS ----------
 void setupOTA(){
   if (MDNS.begin("telemetry")){ /* ok */ }
-  ArduinoOTA.setHostname("telemetry-c3");
+  ArduinoOTA.setHostname("telemetry");
   ArduinoOTA.setPassword("espota"); // troque!
   ArduinoOTA.begin();
 }
 
-// ======================== BLE (UART + slider remoto) =========================
-static NimBLEUUID serviceUUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
-static NimBLEUUID charRxUUID ("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
-static NimBLEUUID charTxUUID ("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
-
-static bool bleClientConnected = false;
-
-// modo remoto via slider BLE
-volatile bool  g_ble_remote_mode = false;
-volatile float g_ble_remote_pct  = 0.0f;
-
-class MyServerCallbacks : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer* s) {
-    bleClientConnected = true;
-  }
-  void onDisconnect(NimBLEServer* s) {
-    bleClientConnected = false;
-  }
-};
-
-class MyRxCallbacks : public NimBLECharacteristicCallbacks {
-  void onWrite(NimBLECharacteristic* c) {
-    std::string v = c->getValue();
-    if (v.empty()) return;
-    String cmd = String(v.c_str());
-    cmd.trim();
-
-    if (cmd.startsWith("HOLD")) {
-      int sp = cmd.indexOf(' ');
-      int pct = 0;
-      if (sp > 0) pct = cmd.substring(sp + 1).toInt();
-      pct = constrain(pct, 0, 100);
-      g_ble_remote_mode = true;
-      g_ble_remote_pct  = pct;
-      sendCmd(String(F("HOLD "))+String(pct));
-    } else if (cmd.equalsIgnoreCase("MODE REM")) {
-      g_ble_remote_mode = true;
-    } else if (cmd.equalsIgnoreCase("MODE PED")) {
-      g_ble_remote_mode = false;
-      sendCmd(F("START"));
-    } else if (cmd.equalsIgnoreCase("STOP")) {
-      sendCmd(F("STOP"));
-    } else if (cmd.equalsIgnoreCase("START")) {
-      sendCmd(F("START"));
-    }
-  }
-};
-
-void setupBLE() {
-  // Nome GAP do dispositivo
-  NimBLEDevice::init("EWolf-Telemetry");
-  NimBLEDevice::setDeviceName("EWolf-Telemetry");
-
-  NimBLEServer* pServer = NimBLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-
-  // Serviço Nordic UART
-  NimBLEService* pService = pServer->createService(serviceUUID);
-
-  // TX: ESP32 -> Celular (notify)
-  bleTxChar = pService->createCharacteristic(
-      charTxUUID,
-      NIMBLE_PROPERTY::NOTIFY
-  );
-
-  // RX: Celular -> ESP32 (write)
-  bleRxChar = pService->createCharacteristic(
-      charRxUUID,
-      NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
-  );
-  bleRxChar->setCallbacks(new MyRxCallbacks());
-
-  pService->start();
-
-  // Advertising com nome visível
-  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-  adv->addServiceUUID(serviceUUID);
-  adv->setName("EWolf-Telemetry");
-  adv->setAppearance(0x0000);
-  adv->start();
-
-  Serial.println(F("[BLE] Advertising como 'EWolf-Telemetry'"));
-}
-
-void bleSendSpeedo() {
-  if (!bleClientConnected || bleTxChar == nullptr) return;
-  String j = "{";
-  j += "\"speed_kmh\":" + String(g_speed_kmh, 2);
-  j += ",\"temp\":";
-  if (isnan(g_temp)) j += "null"; else j += String(g_temp,1);
-  j += ",\"current\":" + String(g_current_bat_a, 2);
-  j += "}";
-  bleTxChar->setValue(j.c_str());
-  bleTxChar->notify();
-}
-
-// ---------------------------- Setup ------------------------------------------
+// ---------- Setup ----------
 void setup(){
   Serial.begin(115200);
   Serial.setTimeout(50);
-
-  LittleFS.begin(true); // formatOnFail=true
+  LittleFS.begin();
 
   WiFi.mode(WIFI_STA);
   WiFiManager wm; wm.setConfigPortalBlocking(true); wm.setTimeout(120);
@@ -712,6 +890,7 @@ void setup(){
   server.on("/ping", [](){ server.send(200, "text/plain", "pong"); });
   server.begin();
 
+  // Log inicial
   Serial.println(F("======================================"));
   Serial.print  (F(" Web UI:    http://")); Serial.print(WiFi.localIP()); Serial.println(F("/"));
   Serial.print  (F(" Speedo:    http://")); Serial.print(WiFi.localIP()); Serial.println(F("/speedo"));
@@ -719,15 +898,16 @@ void setup(){
   Serial.print  (F(" MQTT sub:  ")); Serial.println(TOP_CMD_MOTOR);
   Serial.println(F("======================================"));
 
+  // MQTT
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
 
+  // OTA/mDNS + NTP
   setupOTA();
   setupTime();
-  setupBLE();
 }
 
-// ---------------------------- Loop -------------------------------------------
+// ---------- Loop ----------
 void loop(){
   server.handleClient();
   ArduinoOTA.handle();
@@ -750,7 +930,7 @@ void loop(){
           if (dp>0){
             String k=tok.substring(0,dp);
             String v=tok.substring(dp+1);
-            if      (k=="MS")      { }
+            if      (k=="MS")      { /* opcional */ }
             else if (k=="V")       g_volts = v.toFloat();
             else if (k=="Pct")     g_pct = v.toFloat();
             else if (k=="Temp")    g_temp = v.equalsIgnoreCase("NaN")?NAN:v.toFloat();
@@ -776,26 +956,23 @@ void loop(){
     }
   }
 
+  // MQTT keepalive + telemetria
   ensureMqtt();
   mqtt.loop();
   unsigned long now=millis();
   if (now - lastMqtt >= MQTT_IV_MS){
     lastMqtt=now;
     mqttPublishTelemetry();
+    // limpar ACK antigo no UI após 2s
     if (lastAck.length()>0 && (now - lastAckMs) > 2000) lastAck="";
   }
 
+  // Logging CSV
   if (log_enabled) {
     unsigned long nowMs = millis();
     if (nowMs - lastLog >= LOG_IV_MS) {
       lastLog = nowMs;
       appendCsvRow();
     }
-  }
-
-  static unsigned long lastBle = 0;
-  if (now - lastBle >= 200) {
-    lastBle = now;
-    bleSendSpeedo();
   }
 }
