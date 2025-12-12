@@ -1,24 +1,27 @@
 # E-wolf Telemetria
 
-Coleção de firmwares Arduino/ESP8266 utilizados nos protótipos de telemetria e controle do projeto E-wolf. Os esboços (`.ino`) implementam leitores de acelerador, sensores ambientais, controle PWM de motor e hubs de telemetria com interface web, MQTT e registro de dados.
+Coleção de firmwares Arduino/ESP (ESP8266/ESP32) utilizados nos protótipos de telemetria e controle do projeto E-wolf. Os esboços (`.ino`) implementam leitores de acelerador, sensores ambientais, controle PWM de motor e hubs de telemetria com interface web, MQTT e registro de dados.
 
 ## Conteúdo do repositório
 
-### mottor_controller
+### motor_controller/
 
 | Arquivo | Plataforma | Principais recursos |
 |---------|------------|---------------------|
-| `motor_controller_uno_v2.ino` | Arduino Uno/Nano | Controlador PWM no pino D9 com rampas configuráveis, leitura de acelerador, RPM, correntes (Ibat/Imot) e DHT22 para telemetria. Suporta EEPROM para persistência de parâmetros. |
-| `motor_controller_mega_v2.ino` | Arduino Mega 2560 | Versão para MEGA com PWM no pino D11 (Timer1 OC1A), leitura de acelerador em A0, RPM via PCINT em A8, correntes (Ibat/Imot), DHT22, cálculo de velocidade (wheel/PPR configuráveis) e telemetria em formato chave:valor. Inclui rampas avançadas (soft-start, rampa S, teto de %), modo HOLD e persistência completa de parâmetros na EEPROM.|
-| `motor_controller_mega_v3.ino`  | Arduino Mega 2560 | Evolução do controlador do MEGA acrescentando LOG em microSD via SPI (CS em D10), que cria arquivos `LOGxxx.CSV` e grava periodicamente ms, tensão do acelerador, % de pedal, temperatura, umidade, RPM, velocidade em km/h, correntes Ibat/Imot e duty atual/alvo para análise offline.|
+| `motor_controller_uno/motor_controller_uno_v1/motor_controller_uno_v1.ino` | Arduino Uno/Nano | PWM D9 (Timer1), rampas configuráveis, teto de aceleração, leitura de acelerador (A0), RPM (A1), correntes Ibat/Imot, DHT22, telemetria K:V @115200 e persistência em EEPROM. |
+| `motor_controller_mega/motor_controller_mega_v1/motor_controller_mega_v1.ino` | Arduino Mega 2560 | PWM D11 (Timer1 OC1A), RPM em A8 (PCINT), correntes, DHT22, rampas/teto, telemetria K:V e persistência em EEPROM. |
+| `motor_controller_mega/motor_controller_mega_v2/motor_controller_mega_v2.ino` | Arduino Mega 2560 | v1 + logger em microSD (LOGxxx.CSV) via SPI (CS=10). Grava ms, volts, %, temp, umidade, RPM, velocidade (wheel_cm/ppr), correntes e duty atual/alvo. |
+| `motor_controller_due/motor_controller_due_v1/motor_controller_due_v1.ino` | Arduino Due | Porta para SAM3X8E (3,3 V): PWM 12 bits, RPM em D2 (interrupt), FlashStorage em vez de EEPROM, telemetria K:V. |
 ---
-### telemetry_hub
+### telemetry_hub/
 
 | Arquivo | Plataforma | Principais recursos |
 |---------|------------|---------------------|
-| `telemetry_hub_esp32c3_v4.ino` | ESP32-C3 SuperMini | Versão com UI Web completa (dashboard + speedo), MQTT pub/sub, OTA, mDNS, logger CSV em LittleFS e BLE UART para telemetria + comandos. Interpreta o protocolo K:V vindo do MEGA e expõe `/data`, `/log/*`, calibração via HTTP, e velocidade em tempo real.                                    |
-| `telemetry_hub_esp32c3_v5.ino` | ESP32-C3 SuperMini | Versão mais enxuta e moderna SEM Web UI, focada em MQTT + BLE + Logging. Inclui controle remoto por BLE/MQTT, override de aceleração, seleção automática da origem do comando (LOCAL/BLE/MQTT), CSV rotativo, OTA, mDNS, e telemetria estendida. Ideal para dashboards externos e apps móveis.  |
-| `telemetry_dashboard_mqtt.html` | Dashboard Web (qualquer navegador moderno) | Interface avançada de telemetria em tempo real via MQTT/WebSocket, sem depender de ESP rodando página própria. Exibe tensão, pedal (%), temperatura, umidade, RPM, velocidade, corrente da bateria/motor e razão Ib/I. Inclui gráficos deslizantes (~120 amostras), controle remoto de aceleração (override), STOP/START, envio de configurações (max_pct, log, etc.) e modal para ajustar host/porta/path TLS/WebSocket do broker. Totalmente responsivo, elegante e independente — ótimo para uso em desktop, tablet ou celular.  |
+| `telemetry_hub_esp8266/telemetry_hub_esp8266_v1/telemetry_hub_esp8266_v1.ino` | ESP8266 (NodeMCU/Wemos) | UI web em LittleFS, ponte Serial↔MQTT, OTA, mDNS, logger CSV em LittleFS, WiFiManager. Publica `pb/telemetry/json`, assina `pb/cmd/motor`. |
+| `telemetry_hub_esp32c3/telemetry_hub_esp32c3_v1/telemetry_hub_esp32c3_v1.ino` | ESP32-C3 | Hub com UI web + MQTT + OTA + mDNS + logger CSV (LittleFS). Serial com Arduino, WiFiManager. |
+| `telemetry_hub_esp32c3/telemetry_hub_esp32c3_v2/telemetry_hub_esp32c3_v2.ino` | ESP32-C3 | v1 + BLE UART (telemetria básica + comandos HOLD/START/STOP). |
+| `telemetry_hub_esp32c3/telemetry_hub_esp32c3_v3/telemetry_hub_esp32c3_v3.ino` | ESP32-C3 | Headless (sem HTTP): WiFi + MQTT + BLE UART + logger CSV. Usa Serial1 em GPIO6/7 para falar com o MEGA. |
+| `telemetry_hub_esp32s3/telemetry_hub_esp32s3_v1/telemetry_hub_esp32s3_v1.ino` | ESP32-S3 N16R8 | Variante headless para S3, UART em GPIO9/10, MQTT + BLE + logger CSV + OTA/mDNS. |
 ---
 
 ### pages
@@ -28,16 +31,16 @@ Coleção de firmwares Arduino/ESP8266 utilizados nos protótipos de telemetria 
 
 ## Pré-requisitos
 
-- Arduino IDE (ou PlatformIO) com suporte às placas **ESP8266**, **ESP32** e **Arduino AVR** instalado.
+- Arduino IDE (ou PlatformIO) com suporte às placas **ESP32** (C3/S3) e **ESP8266** e **Arduino AVR** instalado.
 - Bibliotecas utilizadas (instale via Gerenciador de Bibliotecas da IDE ou `platformio.ini`):
-  - `ESP8266WiFi`
-  - `ESP8266WebServer`
+  - `WiFi` / `ESP8266WiFi`
+  - `WebServer` / `ESP8266WebServer`
   - `WiFiManager`
   - `DHT sensor library`
   - `FS` / `LittleFS`
   - `PubSubClient`
   - `EEPROM` (já inclusa na AVR core)
-  - `ArduinoOTA`, `ESP8266mDNS`
+  - `ArduinoOTA`, `ESPmDNS` / `ESP8266mDNS`
 
 Cada sketch possui comentários indicando bibliotecas adicionais específicas (ex.: `time.h` para NTP no hub de telemetria). Consulte a seção superior de cada arquivo para conferir dependências e ajustes finos de hardware.
 
@@ -45,33 +48,33 @@ Segue tudo lapidado em Markdown, prontinho para encaixar no README do E-Wolf v3.
 
 ---
 
-## Pinagem resumida – E-Wolf Telemetria & Controle
+## Pinagem resumida – E-Wolf Telemetria & Controle (Mega + ESP32-S3)
 
-| Função / Componente                   | Tipo / Módulo             | **Arduino Mega 2560**           | **ESP8266 (NodeMCU / Wemos D1 mini)** | Observações                           |
+| Função / Componente                   | Tipo / Módulo             | **Arduino Mega 2560**           | **ESP32-S3 N16R8**                    | Observações                           |
 | ------------------------------------- | ------------------------- | ------------------------------- | ------------------------------------- | ------------------------------------- |
 | Acelerador (Hall)                     | Analógico (0–5 V, 3 fios) | A0                              | —                                     | Leitura analógica (Mega controla PWM) |
 | Sensor de RPM (Hall)                  | Digital (open collector)  | A8                              | —                                     | Interrupção via PCINT no Mega         |
 | Sensor de corrente – bateria (ACS712) | Analógico                 | A2                              | —                                     | Leitura direta do VOUT                |
 | Sensor de corrente – motor (ACS712)   | Analógico                 | A3                              | —                                     | Opcional                              |
-| Sensor DHT22                          | Digital                   | D4                              | D4 (GPIO2)                            | Pode existir em ambos os módulos      |
+| Sensor DHT22                          | Digital                   | D4                              | —                                     | Telemetria no Mega                    |
 | Saída PWM do motor                    | Digital PWM               | D11 (OC1A)                      | —                                     | Saída principal de potência           |
-| Módulo microSD (SPI)                  | SPI                       | CS=10, MOSI=51, MISO=50, SCK=52 | —                                     | Logs CSV locais                       |
-| Serial de telemetria                  | UART                      | TX1=18, RX1=19                  | RX=D7, TX=D8                          | Mega ↔ ESP8266 @ 115200 baud          |
-| Wi-Fi / MQTT / Web UI                 | —                         | —                               | Integrado                             | Hub de telemetria e UI                |
-| Alimentação                           | —                         | 5 V / GND                       | VIN / GND                             | Terra comum obrigatório               |
-| EEPROM interna                        | Persistência              | Interna                         | —                                     | Armazena rampas e limites             |
-| LittleFS                              | Armazenamento             | —                               | Interna                               | Armazena UI e logs do hub             |
+| Módulo microSD (SPI)                  | SPI                       | CS=10, MOSI=51, MISO=50, SCK=52 | —                                     | Logs CSV locais (Mega v2)             |
+| Serial de telemetria                  | UART                      | TX1=18, RX1=19                  | RX=GPIO9, TX=GPIO10                   | Mega ↔ ESP32-S3 @ 115200 baud         |
+| Wi-Fi / MQTT / BLE / Logger           | —                         | —                               | Integrado (sem UI HTTP)               | Hub headless (MQTT + BLE + CSV)       |
+| Alimentação                           | —                         | 5 V / GND                       | 5 V (VBUS/5V) / GND                   | Terra comum obrigatório               |
+| EEPROM interna                        | Persistência              | Interna                         | —                                     | Rampas/limites (Mega)                 |
+| LittleFS                              | Armazenamento             | —                               | Interna                               | Logs/config do hub                    |
 
 ---
 
-## Ligação típica entre Mega e ESP8266
+## Ligação típica entre Mega e ESP32-S3
 
-| Ligação   | **Mega 2560** | **ESP8266** | Descrição                    |
-| --------- | ------------- | ----------- | ---------------------------- |
-| TX1 → RX  | D18 (TX1)     | D7 (RX)     | Mega envia telemetria        |
-| RX1 ← TX  | D19 (RX1)     | D8 (TX)     | ESP envia comandos           |
-| GND ↔ GND | —             | —           | Referência comum obrigatória |
-| 5 V → VIN | —             | VIN         | Alimentação do ESP8266       |
+| Ligação   | **Mega 2560** | **ESP32-S3** | Descrição                    |
+| --------- | ------------- | ------------ | ---------------------------- |
+| TX1 → RX  | D18 (TX1)     | GPIO9 (RX)   | Mega envia telemetria        |
+| RX1 ← TX  | D19 (RX1)     | GPIO10 (TX)  | ESP envia comandos           |
+| GND ↔ GND | —             | —            | Referência comum obrigatória |
+| 5 V → 5 V | —             | 5V/VBUS      | Alimentação do ESP32-S3 (3,3 V no IO) |
 
 ---
 
