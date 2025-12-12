@@ -1,4 +1,4 @@
-// ===== ESP32-C3 SuperMini — Web/UI + Serial Bridge + MQTT + OTA/mDNS + CSV Logging =====
+// ===== ESP32-C3 SuperMini telemetry_hub_esp32c3_v1.ino — Web/UI + Serial Bridge + MQTT + OTA/mDNS + CSV Logging =====
 // Sensores só em telemetria; Arduino não usa para controle nesse estágio.
 // UI: campos de MIN/MAX (com botões também), Poll (ms), teto de aceleração (%), botões de log CSV.
 // MQTT: publica pb/telemetry/json; assina pb/cmd/motor (0=STOP,1=START); LWT em pb/status.
