@@ -1,5 +1,4 @@
-// ===== ESP32-C3 SuperMini — telemetry_hub_esp32c3_v3
-.ino =====
+// ===== ESP32-C3 SuperMini — telemetry_hub_esp32c3_v3.ino =====
 // Hub de telemetria + MQTT + OTA + mDNS + Logger CSV + BLE UART.
 // NÃO tem página HTTP: só WiFi + MQTT + BLE + logging.
 // Sensores só em telemetria; o Arduino MEGA controla PWM/motor.
