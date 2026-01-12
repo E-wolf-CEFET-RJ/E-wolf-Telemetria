@@ -82,7 +82,7 @@ Segue tudo lapidado em Markdown, prontinho para encaixar no README do E-Wolf v3.
 ## 🧩 Fluxo geral do sistema
 
 1. O **Mega 2560** lê acelerador, RPM, correntes e DHT22, controla o PWM e grava logs no microSD.
-2. O **ESP8266** recebe telemetria via Serial, exibe UI Web, publica no MQTT e oferece endpoints HTTP.
+2. O **ESP8266 ou ESP32** recebe telemetria via Serial, exibe UI Web, publica no MQTT e oferece endpoints HTTP.
 3. Os dois módulos podem funcionar independentes, mas juntos formam o **E-Wolf v3 completo**: controle + telemetria.
 
 ---
@@ -95,14 +95,15 @@ Quer que eu adicione uma versão alternativa mais compacta ou um diagrama ASCII 
 1. Abra a IDE Arduino e selecione o sketch desejado.
 2. Escolha a placa correta em **Ferramentas > Placa**:
    - *Wemos D1 mini / NodeMCU* para sketches ESP8266.
+   - *Esp32c3 ou Esp32s3* para sketches ESP832.
    - *Arduino Uno ou Nano* para `motor_controller_uno_v2.ino`.
 3. Ajuste as configurações de porta serial e velocidade conforme o hardware.
 4. Verifique as constantes de hardware no início do arquivo (pinos, divisores de tensão, tipos de sensor, etc.) e adapte às suas necessidades.
 5. Compile e faça o upload normalmente.
 
-## Configuração de rede (ESP8266)
+## Configuração de rede (ESP)
 
-Os sketches baseados em ESP8266 utilizam **WiFiManager**. Caso não haja credenciais salvas, a placa abrirá um ponto de acesso temporário (por padrão `Throttle-Setup` ou definido no código). Conecte-se a esse AP, acesse `192.168.4.1` e forneça as credenciais da rede Wi-Fi desejada.
+Os sketches baseados em ESP's utilizam **WiFiManager**. Caso não haja credenciais salvas, a placa abrirá um ponto de acesso temporário (por padrão `Throttle-Setup` ou definido no código). Conecte-se a esse AP, acesse `192.168.4.1` e forneça as credenciais da rede Wi-Fi desejada.
 
 ## Interface web e APIs
 
@@ -111,12 +112,12 @@ Os sketches baseados em ESP8266 utilizam **WiFiManager**. Caso não haja credenc
 - **Endpoints de controle** (variantes PWM/RPM):
   - `/start` para iniciar o motor com o duty atual.
   - `/stop?duty=` para definir duty cycle (0–100% ou valor bruto 0–1023).
-- **MQTT** (hub ESP8266): publica em `pb/telemetry/json`, assina `pb/cmd/motor` e define LWT em `pb/status`.
+- **MQTT** (hub ESP): publica em `pb/telemetry/json`, assina `pb/cmd/motor` e define LWT em `pb/status`.
 
 
-## Referência de comandos — Arduino + ESP8266
+## Referência de comandos — Arduino + ESP8266 ou ESP32
 
-Projeto: Motor Controller (Arduino) + Telemetry Hub (ESP8266)
+Projeto: Motor Controller (Arduino) + Telemetry Hub (ESP)
 
 Formato: comandos via Serial (Arduino), endpoints HTTP (ESP) e tópicos MQTT.
 
