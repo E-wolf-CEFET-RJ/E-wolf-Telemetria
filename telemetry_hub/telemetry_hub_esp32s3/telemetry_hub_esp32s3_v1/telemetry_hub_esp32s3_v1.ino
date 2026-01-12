@@ -280,7 +280,7 @@ class MyRxCallbacks : public NimBLECharacteristicCallbacks {
 void setupBLE() {
   NimBLEDevice::init("EWolf-Telemetry");
   NimBLEDevice::setDeviceName("EWolf-Telemetry");
-  NimBLEDevice::setMTU(100);
+  NimBLEDevice::setMTU(64);
 
   NimBLEServer* pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -315,19 +315,29 @@ void setupBLE() {
 void bleSendSpeedo() {
   if (!bleClientConnected || !bleTxChar) return;
 
-  String j = "{";
-  j += "\"mode\":"+String(bleMode);
-  j += ",\"speed_kmh\":"+String(g_speed_kmh,1);
-  j += ",\"rpm\":"+String(g_rpm,1);
-  j += ",\"pct\":"+String(g_pct,1);
-  j += ",\"temp\":";
-  if (isnan(g_temp)) j += "null"; else j += String(g_temp,1);
-  j += ",\"current\":"+String(g_current_bat_a,2);
-  j += "}";
+  char buf[160];
 
-  bleTxChar->setValue(j.c_str());
+  float temp = isnan(g_temp) ? 0.0f : g_temp;
+
+  snprintf(buf, sizeof(buf),
+    "{\"mode\":%d,"
+    "\"speed_kmh\":%.1f,"
+    "\"rpm\":%.1f,"
+    "\"pct\":%.1f,"
+    "\"temp\":%.1f,"
+    "\"current\":%.2f}",
+    bleMode,
+    g_speed_kmh,
+    g_rpm,
+    g_pct,
+    temp,
+    g_current_bat_a
+  );
+
+  bleTxChar->setValue((uint8_t*)buf, strlen(buf));
   bleTxChar->notify();
 }
+
 
 // ========= OTA =========
 void setupOTA(){
@@ -761,7 +771,7 @@ void loop(){
 
   // BLE
   static unsigned long lastBle = 0;
-  if (now - lastBle >= 200) {
+  if (now - lastBle >= 100) {
     lastBle = now;
     bleSendSpeedo();
   }

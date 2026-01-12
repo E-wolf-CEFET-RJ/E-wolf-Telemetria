@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>E-Wolf BLE Telemetry HUD</title>
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  overflow: hidden;
+  touch-action: manipulation;
+  user-select: none;
+  font-family: sans-serif;
+}
+
+canvas {
+  display: block;
+}
+
+/* ===== SHIFT LIGHT ===== */
+#shift {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  background: transparent;
+  z-index: 5;
+}
+
+/* ===== SETTINGS OVERLAY ===== */
+#settings {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.95);
+  color: #fff;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  z-index: 10;
+}
+
+#settings label {
+  display: flex;
+  justify-content: space-between;
+  width: 260px;
+}
+
+#settings input {
+  width: 80px;
+}
+
+#settings button {
+  margin-top: 20px;
+  padding: 10px 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="shift"></div>
+<canvas id="hud"></canvas>
+
+<div id="settings">
+  <label>Velocidade Máx <input id="maxSpeed" type="number"></label>
+  <label>RPM Máx <input id="maxRPM" type="number"></label>
+  <label>Ticks <input id="ticks" type="number"></label>
+  <label>Corrente Glow <input id="currentLimit" type="number"></label>
+  <button onclick="saveSettings()">Salvar</button>
+</div>
+
+<script>
+/* ================= BLE UUIDs ================= */
+const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const TX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+/* ================= STATE ================= */
+const data = {
+  speed_kmh: 0,
+  rpm: 0,
+  pct: 0,
+  temp: 0,
+  current: 0
+};
+
+const MODES = ['speed', 'rpm', 'pct'];
+let modeIndex = 0;
+
+/* ================= SETTINGS ================= */
+const settings = {
+  maxSpeed: Number(localStorage.maxSpeed || 60),
+  maxRPM: Number(localStorage.maxRPM || 3000),
+  tickCount: Number(localStorage.tickCount || 10),
+  currentLimit: Number(localStorage.currentLimit || 15)
+};
+
+/* ================= CANVAS ================= */
+const canvas = document.getElementById('hud');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ================= NIGHT MODE ================= */
+let nightMode = false;
+function updateNightMode() {
+  const h = new Date().getHours();
+  nightMode = (h < 6 || h >= 18);
+}
+setInterval(updateNightMode, 60000);
+updateNightMode();
+
+/* ================= GAUGE ================= */
+class Gauge {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.value = 0;
+    this.target = 0;
+    this.maxValue = 100;
+    this.tickCount = settings.tickCount;
+    this.glowEnabled = false;
+
+    this.startAngle = 210 * Math.PI / 180;
+    this.sweepAngle = 240 * Math.PI / 180;
+  }
+
+  setTarget(v, max) {
+    this.maxValue = Math.max(1, max);
+    this.target = Math.min(Math.max(v, 0), this.maxValue);
+  }
+
+  setGlow(e) {
+    this.glowEnabled = e;
+  }
+
+  update() {
+    this.value += (this.target - this.value) * 0.12;
+  }
+
+  draw(w, h, label, unit) {
+    const ctx = this.ctx;
+    ctx.clearRect(0,0,w,h);
+
+    const size = Math.min(w, h);
+    const cx = w / 2;
+    const radius = Math.min(w, h) * 0.42;
+    const cy = radius + 30;
+
+    // Fundo
+    ctx.lineWidth = 40;
+    ctx.strokeStyle = '#1F2430';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, this.startAngle, this.startAngle + this.sweepAngle);
+    ctx.stroke();
+
+    // Ticks
+    for (let i = 0; i <= this.tickCount; i++) {
+      const frac = i / this.tickCount;
+      const ang = this.startAngle + this.sweepAngle * frac;
+      const isMajor = (i === 0 || i === Math.floor(this.tickCount/2) || i === this.tickCount);
+      const len = isMajor ? 28 : 18;
+
+      const sx = cx + Math.cos(ang) * radius;
+      const sy = cy + Math.sin(ang) * radius;
+      const ex = cx + Math.cos(ang) * (radius - len);
+      const ey = cy + Math.sin(ang) * (radius - len);
+
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#3C4250';
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(sx, sy);
+      ctx.stroke();
+    }
+
+    // Labels numéricos
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px sans-serif';
+    [0, 0.5, 1].forEach(f => {
+      const ang = this.startAngle + this.sweepAngle * f;
+      const val = Math.round(this.maxValue * f);
+      const tx = cx + Math.cos(ang) * (radius - 55);
+      const ty = cy + Math.sin(ang) * (radius - 55);
+      ctx.fillText(val.toString(), tx, ty);
+    });
+
+    const frac = Math.min(Math.max(this.value / this.maxValue, 0), 1);
+    const activeSweep = this.sweepAngle * frac;
+
+    let color = '#7AA2F7';
+    if (frac >= 0.9) color = '#F77676';
+    else if (frac >= 0.7) color = '#F7D27A';
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 40;
+
+    if (this.glowEnabled) {
+      ctx.shadowBlur = 25;
+      ctx.shadowColor = color;
+    } else ctx.shadowBlur = 0;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, this.startAngle, this.startAngle + activeSweep);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Ponteiro
+    const ang = this.startAngle + activeSweep;
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(ang)*radius*0.9, cy + Math.sin(ang)*radius*0.9);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 14, 0, Math.PI*2);
+    ctx.fill();
+
+    // Texto
+    ctx.textAlign = 'center';
+    ctx.font = '72px sans-serif';
+    ctx.fillText(this.value.toFixed(0), cx, cy - 30);
+    ctx.font = '18px sans-serif';
+    ctx.fillText(unit, cx, cy + 10);
+    ctx.font = '16px sans-serif';
+    ctx.fillText(label, cx, cy + 40);
+
+    // Laterais
+    ctx.fillText(`Temp ${data.temp.toFixed(1)}°C`, w*0.12, h*0.15);
+    ctx.fillText(`I ${data.current.toFixed(1)}A`, w*0.88, h*0.15);
+  }
+}
+
+const gauge = new Gauge(ctx);
+
+/* ================= BLE ================= */
+async function connectBLE() {
+  const device = await navigator.bluetooth.requestDevice({
+    filters: [{ services: [SERVICE_UUID] }]
+  });
+
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  const tx = await service.getCharacteristic(TX_UUID);
+
+  await tx.startNotifications();
+  tx.addEventListener('characteristicvaluechanged', e => {
+    try {
+      Object.assign(data, JSON.parse(new TextDecoder().decode(e.target.value)));
+    } catch {}
+  });
+
+  document.documentElement.requestFullscreen();
+}
+
+/* ================= SHIFT LIGHT ================= */
+const shift = document.getElementById('shift');
+function updateShiftLight() {
+  const frac = data.rpm / settings.maxRPM;
+  if (frac > 0.95) {
+    shift.style.background = '#ff3b3b';
+    shift.style.boxShadow = '0 0 25px #ff3b3b';
+  } else if (frac > 0.85) {
+    shift.style.background = '#ffd23b';
+    shift.style.boxShadow = '0 0 15px #ffd23b';
+  } else {
+    shift.style.background = 'transparent';
+    shift.style.boxShadow = 'none';
+  }
+}
+
+/* ================= GESTURES ================= */
+let tapTimer = null;
+let longPressTimer = null;
+
+canvas.addEventListener('pointerdown', () => {
+  longPressTimer = setTimeout(openSettings, 5000);
+});
+
+canvas.addEventListener('pointerup', () => {
+  clearTimeout(longPressTimer);
+});
+
+canvas.addEventListener('click', () => {
+  if (!tapTimer) {
+    tapTimer = setTimeout(() => {
+      tapTimer = null;
+      connectBLE();
+    }, 250);
+  } else {
+    clearTimeout(tapTimer);
+    tapTimer = null;
+    modeIndex = (modeIndex + 1) % MODES.length;
+  }
+});
+
+/* ================= SETTINGS ================= */
+function openSettings() {
+  settings.maxSpeed && (maxSpeed.value = settings.maxSpeed);
+  maxRPM.value = settings.maxRPM;
+  ticks.value = settings.tickCount;
+  currentLimit.value = settings.currentLimit;
+  document.getElementById('settings').style.display = 'flex';
+}
+
+function saveSettings() {
+  settings.maxSpeed = Number(maxSpeed.value);
+  settings.maxRPM = Number(maxRPM.value);
+  settings.tickCount = Number(ticks.value);
+  settings.currentLimit = Number(currentLimit.value);
+  Object.assign(localStorage, settings);
+  gauge.tickCount = settings.tickCount;
+  document.getElementById('settings').style.display = 'none';
+}
+
+/* ================= LOOP ================= */
+function loop() {
+  const mode = MODES[modeIndex];
+  let value, max, label, unit;
+
+  if (mode === 'speed') {
+    value = data.speed_kmh;
+    max = settings.maxSpeed;
+    label = 'Velocidade';
+    unit = 'km/h';
+  } else if (mode === 'rpm') {
+    value = data.rpm;
+    max = settings.maxRPM;
+    label = 'RPM';
+    unit = 'rpm';
+  } else {
+    value = data.pct;
+    max = 100;
+    label = 'Aceleração';
+    unit = '%';
+  }
+
+  gauge.setTarget(value, max);
+  gauge.setGlow(data.current > settings.currentLimit);
+  gauge.update();
+  gauge.draw(canvas.width, canvas.height, label, unit);
+  updateShiftLight();
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+
+</body>
+</html>
