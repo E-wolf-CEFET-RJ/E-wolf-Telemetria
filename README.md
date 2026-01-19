@@ -51,20 +51,21 @@ Segue tudo lapidado em Markdown, prontinho para encaixar no README do E-Wolf v3.
 
 ## Pinagem resumida – E-Wolf Telemetria & Controle (Mega + ESP32-S3)
 
-| Função / Componente                   | Tipo / Módulo             | **Arduino Mega 2560**           | **ESP32-S3 N16R8**                    | Observações                           |
-| ------------------------------------- | ------------------------- | ------------------------------- | ------------------------------------- | ------------------------------------- |
-| Acelerador (Hall)                     | Analógico (0–5 V, 3 fios) | A0                              | —                                     | Leitura analógica (Mega controla PWM) |
-| Sensor de RPM (Hall)                  | Digital (open collector)  | A8                              | —                                     | Interrupção via PCINT no Mega         |
-| Sensor de corrente – bateria (ACS712) | Analógico                 | A2                              | —                                     | Leitura direta do VOUT                |
-| Sensor de corrente – motor (ACS712)   | Analógico                 | A3                              | —                                     | Opcional                              |
-| Sensor DHT22                          | Digital                   | D4                              | —                                     | Telemetria no Mega                    |
-| Saída PWM do motor                    | Digital PWM               | D11 (OC1A)                      | —                                     | Saída principal de potência           |
-| Módulo microSD (SPI)                  | SPI                       | CS=10, MOSI=51, MISO=50, SCK=52 | —                                     | Logs CSV locais (Mega v2)             |
-| Serial de telemetria                  | UART                      | TX1=18, RX1=19                  | RX=GPIO9, TX=GPIO10                   | Mega ↔ ESP32-S3 @ 115200 baud         |
-| Wi-Fi / MQTT / BLE / Logger           | —                         | —                               | Integrado (sem UI HTTP)               | Hub headless (MQTT + BLE + CSV)       |
-| Alimentação                           | —                         | 5 V / GND                       | 5 V (VBUS/5V) / GND                   | Terra comum obrigatório               |
-| EEPROM interna                        | Persistência              | Interna                         | —                                     | Rampas/limites (Mega)                 |
-| LittleFS                              | Armazenamento             | —                               | Interna                               | Logs/config do hub                    |
+| Função / Componente                   | Tipo / Módulo             | **Arduino Mega 2560**           | **ESP32-S3 N16R8**        | Observações                                                                 |
+| ------------------------------------- | ------------------------- | ------------------------------- | ------------------------- | --------------------------------------------------------------------------- |
+| Acelerador (Hall)                     | Analógico (0–5 V, 3 fios) | A0                              | —                         | Leitura analógica (Mega controla PWM)                                       |
+| Sensor de RPM (Hall)                  | Digital (open collector)  | A8                              | —                         | Interrupção via PCINT no Mega                                                |
+| Sensor de corrente – bateria (ACS712) | Analógico                 | A2                              | —                         | Leitura direta do VOUT                                                       |
+| Sensor de corrente – motor (ACS712)   | Analógico                 | A3                              | —                         | Opcional                                                                     |
+| Sensor DHT22                          | Digital                   | D4                              | —                         | Telemetria no Mega                                                           |
+| Saída PWM do motor                    | Digital PWM               | D11 (OC1A)                      | —                         | Saída principal de potência                                                  |
+| RTC (Relógio em tempo real)           | DS1302 (ThreeWire)        | DATA=22, CLK=23, RST=24         | —                         | Fonte de timestamp dos logs CSV (biblioteca Makuna, leitura atômica)        |
+| Módulo microSD (SPI)                  | SPI                       | CS=10, MOSI=51, MISO=50, SCK=52 | —                         | Logs CSV locais (Mega v2)                                                    |
+| Serial de telemetria                  | UART                      | TX1=18, RX1=19                 | RX=GPIO9, TX=GPIO10       | Mega ↔ ESP32-S3 @ 115200 baud                                                |
+| Wi-Fi / MQTT / BLE / Logger           | —                         | —                               | Integrado                 | Hub headless (MQTT + BLE + CSV)                                              |
+| Alimentação                           | —                         | 5 V / GND                       | 5 V (VBUS/5V) / GND       | **Terra comum obrigatório**                                                  |
+| EEPROM interna                        | Persistência              | Interna                         | —                         | Rampas, limites e calibração (Mega)                                         |
+| LittleFS                              | Armazenamento             | —                               | Interna                   | Logs e configuração do hub                                                   |
 
 ---
 
