@@ -256,148 +256,6 @@
       </div>
     </div>
 
-    <!-- Motor + Override -->
-    <div class="section">
-      <h3>Controle de motor, override e fonte</h3>
-      <div class="controls-row" style="margin-bottom:6px">
-        <button id="btnStop" class="btn-red">STOP</button>
-        <button id="btnStart" class="btn-green">START</button>
-        <button id="btnCfg" class="btn-ghost" style="margin-left:auto">Configurar MQTT</button>
-      </div>
-      <div class="controls-row">
-        <span class="muted" id="statusLine">Aguardando conexão MQTT…</span>
-            <div class="controls-row muted" id="msgMetaRow">
-        <span>ltima mensagem: <b id="lastMsg">--</b></span>
-        <span style="margin-left:auto">Intervalo mnimo: <b><span id="intervalTxt">--</span> ms</b></span>
-      </div>
-
-      </div>
-
-      <div class="slider-row">
-        <div class="controls-row">
-          <label class="muted">Override via MQTT (0–100%)</label>
-          <span class="muted">valor: <b id="thVal">0%</b></span>
-        </div>
-        <input type="range" id="throttleSlider" min="0" max="100" value="0">
-        <div class="controls-row">
-          <div class="pill-row">
-            <span class="pill-label">Hold rápido (%):</span>
-            <input id="holdIn" type="number" min="0" max="100" step="1" value="0" style="width:70px">
-            <button id="btnHold" class="btn-blue">Aplicar Hold</button>
-          </div>
-          <button id="btnAuto" class="btn-ghost" style="margin-left:auto">Modo AUTO (controle local)</button>
-        </div>
-        <div class="muted">
-          Mover o slider → <b>modo override</b>. Botão AUTO → <b>controle local</b>. Hold aplica um valor fixo de override.
-        </div>
-      </div>
-    </div>
-
-    <!-- Calibração Acelerador -->
-    <div class="section">
-      <h3>Calibração do acelerador (MIN/MAX) e teto</h3>
-      <div class="controls-row">
-        <span class="muted">MIN atual: <b id="minv">--</b> V</span>
-        <span class="muted">MAX atual: <b id="maxv">--</b> V</span>
-      </div>
-      <div class="controls-row">
-        <label class="muted">MIN (V):</label>
-        <input id="minIn" type="number" step="0.001" style="width:100px">
-        <button id="btnMinSet" class="btn-ghost">Aplicar MIN</button>
-
-        <label class="muted">MAX (V):</label>
-        <input id="maxIn" type="number" step="0.001" style="width:100px">
-        <button id="btnMaxSet" class="btn-ghost">Aplicar MAX</button>
-      </div>
-      <div class="controls-row">
-        <button id="btnMinFromNow" class="btn-ghost">Definir MIN = tensão atual</button>
-        <button id="btnMaxFromNow" class="btn-ghost">Definir MAX = tensão atual</button>
-        <button id="btnMinMaxDefault" class="btn-ghost">Restaurar padrão (0.8 / 4.2 V)</button>
-      </div>
-      <div class="controls-row">
-        <label class="muted">Teto de aceleração (max_pct):</label>
-        <input id="maxPctIn" type="number" min="0" max="100" step="1" placeholder="100" style="width:80px">
-        <button id="btnMaxPct" class="btn-ghost">Aplicar teto</button>
-      </div>
-      <div class="muted">
-        Tudo isso é enviado em JSON no tópico <code>pb/cmd/config</code> (chaves: <code>min_v</code>, <code>max_v</code>, <code>max_pct</code>).
-      </div>
-    </div>
-
-    <!-- Roda & RPM -->
-    <div class="section">
-      <h3>Roda e sensor de RPM</h3>
-      <div class="controls-row">
-        <label class="muted">Diâmetro roda (cm):</label>
-        <input id="wheelIn" type="number" min="0.5" step="0.1" style="width:90px">
-        <button id="btnWheel" class="btn-ghost">Aplicar</button>
-
-        <label class="muted">Pulsos por volta (PPR):</label>
-        <input id="pprIn" type="number" min="1" step="1" style="width:70px">
-        <button id="btnPpr" class="btn-ghost">Aplicar</button>
-      </div>
-      <div class="muted">
-        Enviado como <code>{"wheel_cm": X, "ppr": N}</code> em <code>pb/cmd/config</code>.
-      </div>
-    </div>
-
-    <!-- Parâmetros de rampa / PWM -->
-    <div class="section">
-      <h3>Parâmetros de rampa / PWM (Arduino)</h3>
-      <div class="controls-row">
-        <label class="muted">PWM (Hz):</label>
-        <input id="pwmfIn" type="number" min="100" max="8000" step="50" value="1000" style="width:80px">
-        <label class="muted">Start mín (%):</label>
-        <input id="startMinIn" type="number" min="0" max="40" step="1" value="8" style="width:70px">
-        <button id="btnPwm" class="btn-ghost">Aplicar PWM/Start</button>
-      </div>
-      <div class="controls-row">
-        <label class="muted">Rampa rápida (ms):</label>
-        <input id="rapidMsIn" type="number" min="50" max="1500" step="10" value="250" style="width:90px">
-        <label class="muted">RapUp (pct/s):</label>
-        <input id="rapUpIn" type="number" min="10" max="400" step="5" value="150" style="width:80px">
-        <button id="btnRapid" class="btn-ghost">Aplicar rampa rápida</button>
-      </div>
-      <div class="controls-row">
-        <label class="muted">Slew UP (pct/s):</label>
-        <input id="slewUpIn" type="number" min="5" max="200" step="5" value="40" style="width:80px">
-        <label class="muted">Slew DN (pct/s):</label>
-        <input id="slewDnIn" type="number" min="5" max="300" step="5" value="60" style="width:80px">
-        <button id="btnSlew" class="btn-ghost">Aplicar Slew</button>
-      </div>
-      <div class="controls-row">
-        <label class="muted">ZeroTimeout RPM (ms):</label>
-        <input id="zeroMsIn" type="number" min="50" max="2000" step="10" value="600" style="width:90px">
-        <button id="btnZero" class="btn-ghost">Aplicar ZeroTimeout</button>
-      </div>
-      <div class="muted">
-        Esses parâmetros são enviados em <code>pb/cmd/config</code> com chaves como
-        <code>pwm_hz</code>, <code>start_min_pct</code>, <code>rapid_ms</code>, <code>rapid_up</code>,
-        <code>slew_up</code>, <code>slew_dn</code>, <code>zero_timeout_ms</code>.  
-        O firmware precisa implementar o uso delas.
-      </div>
-    </div>
-
-    <!-- CSV Logger via MQTT -->
-    <div class="section">
-      <h3>CSV Logger (LittleFS no hub)</h3>
-      <div class="controls-row">
-        <button id="btnLogStart" class="btn-green">⏺️ Iniciar log</button>
-        <button id="btnLogStop" class="btn-red">⏹️ Parar log</button>
-        <button id="btnLogClear" class="btn-ghost">🧹 Limpar arquivo</button>
-        <label class="muted">Intervalo (ms):</label>
-        <input id="logIvIn" type="number" min="100" step="100" value="1000" style="width:90px">
-        <button id="btnLogIv" class="btn-ghost">Aplicar</button>
-      </div>
-      <div class="muted">
-        Status: <span id="logStatus">—</span>
-      </div>
-      <div class="muted" style="margin-top:4px">
-        Controle via MQTT (<code>pb/cmd/config</code>): <code>{"log": true/false, "log_iv_ms": N, "log_clear": true}</code>.  
-        Para baixar o CSV, use a rota HTTP exposta pelo ESP (ex: <code>/telemetry.csv</code>), se o firmware fornecer.
-      </div>
-    </div>
-
     <!-- Gráficos -->
     <div class="section">
       <h3>Gráficos (janela deslizante ~120 pontos)</h3>
@@ -413,63 +271,21 @@
         <div class="chart"><h4>Ib/Im (adim.)</h4><canvas id="cvIR"></canvas></div>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- Modal de configuração MQTT -->
-<div id="modal" class="modal">
-  <div class="card-modal">
-    <h3 style="margin-top:0">Configuração MQTT (WebSocket)</h3>
-    <div class="row">
-      <label>Host:</label>
-      <input id="hostIn" type="text" placeholder="broker.mqtt-dashboard.com">
-    </div>
-    <div class="row">
-      <label>Porta WebSocket:</label>
-      <input id="portIn" type="number" min="1" max="65535" step="1" placeholder="8000">
-    </div>
-    <div class="row">
-      <label>Usar TLS (wss://):</label>
-      <div>
-        <input id="tlsIn" type="checkbox">
-        <span class="muted">Se marcado, usa <b>wss://</b> em vez de <b>ws://</b>.</span>
+    <div class="section">
+      <h3>Status e Ações</h3>
+      <div class="controls-row">
+        <span class="muted" id="statusLine">Aguardando conexão MQTT…</span>
       </div>
-    </div>
-    <div class="row">
-      <label>WS path:</label>
-      <input id="pathIn" type="text" placeholder="/mqtt">
-    </div>
-    <div class="row">
-      <label>Client ID base:</label>
-      <input id="cidIn" type="text" placeholder="ewolf-dashboard">
-    </div>
-    <div class="row">
-      <label>Tópico telemetria JSON:</label>
-      <input id="topicTlmIn" type="text" placeholder="pb/telemetry/json">
-    </div>
-    <div class="row">
-      <label>Tópico comando motor:</label>
-      <input id="topicMotorIn" type="text" placeholder="pb/cmd/motor">
-    </div>
-    <div class="row">
-      <label>Tópico throttle:</label>
-      <input id="topicThrIn" type="text" placeholder="pb/cmd/throttle">
-    </div>
-    <div class="row">
-      <label>Tópico config:</label>
-      <input id="topicCfgIn" type="text" placeholder="pb/cmd/config">
-    </div>
-    <div class="row">
-      <label>Intervalo mínimo update (ms):</label>
-      <input id="ivalIn" type="number" min="100" max="2000" step="50" value="250">
-    </div>
-    <div class="row" style="justify-content:flex-end;margin-top:10px">
-      <button id="btnCloseModal" class="btn-ghost">Fechar</button>
-      <button id="btnSaveModal" class="btn-green">Salvar e reconectar</button>
-    </div>
-    <div class="cfg-caption">
-      Você pode passar parâmetros pela URL, ex:
-      <code>?host=broker.mqtt-dashboard.com&port=8000&tls=0&path=/mqtt</code>
+      <div class="controls-row muted" id="msgMetaRow">
+        <span>Última mensagem: <b id="lastMsg">--</b></span>
+        <span style="margin-left:auto">Intervalo mínimo: <b><span id="intervalTxt">--</span> ms</b></span>
+      </div>
+      <div class="controls-row" style="margin-top:8px">
+        <a class="btn-blue" href="./accelerator_config_mqtt.html" style="text-decoration:none;display:inline-flex;align-items:center">
+          Abrir configurador de acelerador
+        </a>
+      </div>
     </div>
   </div>
 </div>
@@ -483,9 +299,6 @@ const DEFAULT_CFG = {
   path: '/mqtt',
   cid: 'ewolf-dashboard',
   topicTlm: 'pb/telemetry/json',
-  topicMotor: 'pb/cmd/motor',
-  topicThr: 'pb/cmd/throttle',
-  topicCfg: 'pb/cmd/config',
   IV: 250
 };
 const LS_KEY = 'ewolf_mqtt_cfg_v1';
@@ -508,9 +321,6 @@ function sanitizeCfg(state){
     .replace(/\s+/g,'-')
     .slice(0, 40);
   next.topicTlm   = (next.topicTlm   || DEFAULT_CFG.topicTlm).trim()   || DEFAULT_CFG.topicTlm;
-  next.topicMotor = (next.topicMotor || DEFAULT_CFG.topicMotor).trim() || DEFAULT_CFG.topicMotor;
-  next.topicThr   = (next.topicThr   || DEFAULT_CFG.topicThr).trim()   || DEFAULT_CFG.topicThr;
-  next.topicCfg   = (next.topicCfg   || DEFAULT_CFG.topicCfg).trim()   || DEFAULT_CFG.topicCfg;
   next.IV = clampNum(next.IV, 100, 2000, DEFAULT_CFG.IV);
   return next;
 }
@@ -540,9 +350,6 @@ loadStoredCfg();
   if (qs.has('cid'))       cfg.cid       = get('cid', cfg.cid);
   if (qs.has('topic'))     cfg.topicTlm  = get('topic', cfg.topicTlm);
   if (qs.has('topic_tlm')) cfg.topicTlm  = get('topic_tlm', cfg.topicTlm);
-  if (qs.has('topic_motor')) cfg.topicMotor = get('topic_motor', cfg.topicMotor);
-  if (qs.has('topic_thr'))   cfg.topicThr   = get('topic_thr', cfg.topicThr);
-  if (qs.has('topic_cfg'))   cfg.topicCfg   = get('topic_cfg', cfg.topicCfg);
   if (qs.has('ival'))      cfg.IV        = Number(get('ival', cfg.IV));
 })();
 
@@ -570,70 +377,6 @@ const irEl=document.getElementById('iratio');
 const statusLine=document.getElementById('statusLine');
 const lastMsgEl=document.getElementById('lastMsg');
 const intervalTxt=document.getElementById('intervalTxt');
-const btnStop=document.getElementById('btnStop');
-const btnStart=document.getElementById('btnStart');
-const btnCfg=document.getElementById('btnCfg');
-
-const slider=document.getElementById('throttleSlider');
-const thVal=document.getElementById('thVal');
-const btnAuto=document.getElementById('btnAuto');
-const holdIn=document.getElementById('holdIn');
-const btnHold=document.getElementById('btnHold');
-
-/* Calibração */
-const minvEl=document.getElementById('minv');
-const maxvEl=document.getElementById('maxv');
-const minIn=document.getElementById('minIn');
-const maxIn=document.getElementById('maxIn');
-const maxPctIn=document.getElementById('maxPctIn');
-const btnMinSet=document.getElementById('btnMinSet');
-const btnMaxSet=document.getElementById('btnMaxSet');
-const btnMinFromNow=document.getElementById('btnMinFromNow');
-const btnMaxFromNow=document.getElementById('btnMaxFromNow');
-const btnMinMaxDefault=document.getElementById('btnMinMaxDefault');
-const btnMaxPct=document.getElementById('btnMaxPct');
-
-/* Roda & RPM */
-const wheelIn=document.getElementById('wheelIn');
-const pprIn=document.getElementById('pprIn');
-const btnWheel=document.getElementById('btnWheel');
-const btnPpr=document.getElementById('btnPpr');
-
-/* Rampa / PWM */
-const pwmfIn=document.getElementById('pwmfIn');
-const startMinIn=document.getElementById('startMinIn');
-const rapidMsIn=document.getElementById('rapidMsIn');
-const rapUpIn=document.getElementById('rapUpIn');
-const slewUpIn=document.getElementById('slewUpIn');
-const slewDnIn=document.getElementById('slewDnIn');
-const zeroMsIn=document.getElementById('zeroMsIn');
-const btnPwm=document.getElementById('btnPwm');
-const btnRapid=document.getElementById('btnRapid');
-const btnSlew=document.getElementById('btnSlew');
-const btnZero=document.getElementById('btnZero');
-
-/* Logger */
-const btnLogStart=document.getElementById('btnLogStart');
-const btnLogStop=document.getElementById('btnLogStop');
-const btnLogClear=document.getElementById('btnLogClear');
-const logIvIn=document.getElementById('logIvIn');
-const btnLogIv=document.getElementById('btnLogIv');
-const logStatus=document.getElementById('logStatus');
-
-/* Modal */
-const modal=document.getElementById('modal');
-const hostIn=document.getElementById('hostIn');
-const portIn=document.getElementById('portIn');
-const tlsIn=document.getElementById('tlsIn');
-const pathIn=document.getElementById('pathIn');
-const cidIn=document.getElementById('cidIn');
-const topicTlmIn=document.getElementById('topicTlmIn');
-const topicMotorIn=document.getElementById('topicMotorIn');
-const topicThrIn=document.getElementById('topicThrIn');
-const topicCfgIn=document.getElementById('topicCfgIn');
-const ivalIn=document.getElementById('ivalIn');
-const btnCloseModal=document.getElementById('btnCloseModal');
-const btnSaveModal=document.getElementById('btnSaveModal');
 
 const updateIntervalLabel = ()=> intervalTxt.textContent = cfg.IV.toString();
 
@@ -706,10 +449,6 @@ function drawSeries(canvasId,data,yLabel,minY=null,maxY=null){
 /* ---------- MQTT ---------- */
 let client=null;
 let lastDraw=0;
-
-/* últimos valores pra usar em "usar valor atual" */
-let lastVolts = NaN;
-let lastPct   = NaN;
 
 function setMqttStatus(state, text){
   mqttText.textContent = text;
@@ -794,9 +533,6 @@ function connectMqtt(recreate=true){
     const ratio = (ib!=null && im!=null && !isNaN(ib) && !isNaN(im) && Math.abs(im)>1e-3)
       ? (ib/im) : null;
 
-    lastVolts = volts;
-    lastPct   = pct;
-
     if(!Number.isNaN(volts)) vEl.textContent = volts.toFixed(3);
     if(!Number.isNaN(pct))   pEl.textContent = pct.toFixed(1);
     tEl.textContent=(temp==null||Number.isNaN(temp))?'--':temp.toFixed(1);
@@ -818,33 +554,6 @@ function connectMqtt(recreate=true){
     const ack = (d.ack || '').toString().trim();
     ackBadge.textContent = 'ack: ' + (ack ? ack : '—');
 
-    // Calibração mostrada
-    if (typeof d.min === 'number') {
-      minvEl.textContent = d.min.toFixed(3);
-      if (document.activeElement !== minIn) minIn.value = d.min.toFixed(3);
-    }
-    if (typeof d.max === 'number') {
-      maxvEl.textContent = d.max.toFixed(3);
-      if (document.activeElement !== maxIn) maxIn.value = d.max.toFixed(3);
-    }
-    if (typeof d.max_pct === 'number' && document.activeElement !== maxPctIn) {
-      maxPctIn.value = d.max_pct.toFixed(0);
-    }
-    if (typeof d.wheel_cm === 'number' && document.activeElement !== wheelIn) {
-      wheelIn.value = d.wheel_cm.toFixed(1);
-    }
-    if (typeof d.ppr === 'number' && document.activeElement !== pprIn) {
-      pprIn.value = d.ppr.toString();
-    }
-
-    // Logger status (se o firmware mandar)
-    if (typeof d.log_enabled !== 'undefined') {
-      const sz = d.log_size || 0;
-      const iv = d.log_iv_ms || 0;
-      logStatus.textContent = (d.log_enabled ? 'ON' : 'OFF') + ' • ' + sz + ' bytes @ ' + iv + ' ms';
-      if (iv && document.activeElement !== logIvIn) logIvIn.value = iv;
-    }
-
     pushBuf(buf.V, Number.isNaN(volts)?null:volts);
     pushBuf(buf.P, Number.isNaN(pct)?null:pct);
     pushBuf(buf.S, (spd==null||Number.isNaN(spd))?null:spd);
@@ -865,157 +574,16 @@ function connectMqtt(recreate=true){
     drawSeries('cvIM',buf.IM,'A');
     drawSeries('cvIR',buf.IR,'Ib/Im');
 
-    statusLine.textContent = 'Última mensagem: ' + new Date().toLocaleTimeString();
+    const nowLabel = new Date().toLocaleTimeString();
+    statusLine.textContent = 'Última mensagem: ' + nowLabel;
+    lastMsgEl.textContent = nowLabel;
   });
 }
 
-/* ---------- Publicadores ---------- */
-function publish(topic, payload){
-  if (!client || !client.connected) return;
-  try{
-    client.publish(topic, payload, {qos:0, retain:false});
-  }catch(e){
-    console.log('publish error', e);
-  }
-}
-
-function publishMotor(cmd){
-  publish(cfg.topicMotor, cmd);
-}
-
-function publishThrottleOverride(pct){
-  const obj = {mode:"override", pct: pct};
-  publish(cfg.topicThr, JSON.stringify(obj));
-}
-
-function publishThrottleAuto(){
-  const obj = {mode:"auto"};
-  publish(cfg.topicThr, JSON.stringify(obj));
-}
-
-function sendConfigPatch(patch){
-  publish(cfg.topicCfg, JSON.stringify(patch));
-}
-
-/* ---------- UI events ---------- */
-btnStop.onclick = ()=> publishMotor('STOP');
-btnStart.onclick = ()=> publishMotor('START');
-
-btnCfg.onclick = ()=>{
-  hostIn.value = cfg.host;
-  portIn.value = cfg.port;
-  tlsIn.checked = cfg.tls;
-  pathIn.value = cfg.path;
-  cidIn.value  = cfg.cid;
-  topicTlmIn.value = cfg.topicTlm;
-  topicMotorIn.value = cfg.topicMotor;
-  topicThrIn.value   = cfg.topicThr;
-  topicCfgIn.value   = cfg.topicCfg;
-  ivalIn.value = cfg.IV;
-  modal.style.display='flex';
-};
-btnCloseModal.onclick = ()=> modal.style.display='none';
-btnSaveModal.onclick = ()=>{
-  cfg.host = hostIn.value.trim() || cfg.host;
-  cfg.port = Number(portIn.value || cfg.port);
-  cfg.tls  = !!tlsIn.checked;
-  cfg.path = pathIn.value.trim() || cfg.path;
-  cfg.cid  = cidIn.value.trim() || cfg.cid;
-  cfg.topicTlm = topicTlmIn.value.trim() || cfg.topicTlm;
-  cfg.topicMotor = topicMotorIn.value.trim() || cfg.topicMotor;
-  cfg.topicThr   = topicThrIn.value.trim() || cfg.topicThr;
-  cfg.topicCfg   = topicCfgIn.value.trim() || cfg.topicCfg;
-  cfg.IV   = Math.max(100, Math.min(2000, Number(ivalIn.value)||cfg.IV));
-  modal.style.display='none';
-  connectMqtt(true);
-};
-
-let sliderTimeout = null;
-slider.oninput = ()=>{
-  const val = Number(slider.value);
-  thVal.textContent = val.toFixed(0) + '%';
-  if (sliderTimeout) clearTimeout(sliderTimeout);
-  sliderTimeout = setTimeout(()=>{
-    publishThrottleOverride(val);
-  }, 120);
-};
-btnAuto.onclick = ()=>{
-  publishThrottleAuto();
-};
-
-/* Hold = basicamente override travado no valor do campo */
-btnHold.onclick = ()=>{
-  const n = Math.max(0, Math.min(100, parseInt(holdIn.value || "0", 10)));
-  slider.value = n;
-  thVal.textContent = n.toFixed(0) + '%';
-  publishThrottleOverride(n);
-};
-
-/* Calibração */
-btnMinSet.onclick = ()=>{
-  const v = parseFloat(minIn.value || "0");
-  if (!Number.isNaN(v)) sendConfigPatch({min_v: v});
-};
-btnMaxSet.onclick = ()=>{
-  const v = parseFloat(maxIn.value || "0");
-  if (!Number.isNaN(v)) sendConfigPatch({max_v: v});
-};
-btnMinFromNow.onclick = ()=>{
-  if (!Number.isNaN(lastVolts)) sendConfigPatch({min_v: lastVolts});
-};
-btnMaxFromNow.onclick = ()=>{
-  if (!Number.isNaN(lastVolts)) sendConfigPatch({max_v: lastVolts});
-};
-btnMinMaxDefault.onclick = ()=>{
-  sendConfigPatch({min_v: 0.8, max_v: 4.2});
-};
-btnMaxPct.onclick = ()=>{
-  const x = Math.max(0, Math.min(100, parseInt(maxPctIn.value || "100", 10)));
-  sendConfigPatch({max_pct: x});
-};
-
-/* Roda & PPR */
-btnWheel.onclick = ()=>{
-  const cm = parseFloat(wheelIn.value || "50.8");
-  if (!Number.isNaN(cm)) sendConfigPatch({wheel_cm: cm});
-};
-btnPpr.onclick = ()=>{
-  const n = parseInt(pprIn.value || "1", 10);
-  if (!Number.isNaN(n)) sendConfigPatch({ppr: n});
-};
-
-/* Rampa / PWM */
-btnPwm.onclick = ()=>{
-  const hz = Math.max(100, Math.min(8000, parseInt(pwmfIn.value || "1000", 10)));
-  const sm = Math.max(0,   Math.min(40,   parseInt(startMinIn.value || "8", 10)));
-  sendConfigPatch({pwm_hz: hz, start_min_pct: sm});
-};
-btnRapid.onclick = ()=>{
-  const ms = Math.max(50,  Math.min(1500, parseInt(rapidMsIn.value || "250", 10)));
-  const up = Math.max(10,  Math.min(400,  parseInt(rapUpIn.value   || "150", 10)));
-  sendConfigPatch({rapid_ms: ms, rapid_up: up});
-};
-btnSlew.onclick = ()=>{
-  const up = Math.max(5,   Math.min(200,  parseInt(slewUpIn.value || "40", 10)));
-  const dn = Math.max(5,   Math.min(300,  parseInt(slewDnIn.value || "60", 10)));
-  sendConfigPatch({slew_up: up, slew_dn: dn});
-};
-btnZero.onclick = ()=>{
-  const ms = Math.max(50,  Math.min(2000, parseInt(zeroMsIn.value || "600", 10)));
-  sendConfigPatch({zero_timeout_ms: ms});
-};
-
-/* Logger */
-btnLogStart.onclick = ()=> sendConfigPatch({log: true});
-btnLogStop.onclick  = ()=> sendConfigPatch({log: false});
-btnLogClear.onclick = ()=> sendConfigPatch({log_clear: true});
-btnLogIv.onclick    = ()=>{
-  const ms = Math.max(100, parseInt(logIvIn.value || "1000", 10));
-  sendConfigPatch({log_iv_ms: ms});
-};
+/* ---------- Dashboard somente leitura ---------- */
+if (intervalTxt) updateIntervalLabel();
 
 /* ---------- inicialização ---------- */
-updateIntervalLabel();
 connectMqtt();
 drawSeries('cvV',buf.V,'V');
 drawSeries('cvP',buf.P,'%',0,100);

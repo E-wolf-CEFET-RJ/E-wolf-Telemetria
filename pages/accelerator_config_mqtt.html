@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>E-Wolf | Configuracao Avancada do Acelerador (MQTT)</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#05070b;
+    --ink:#ecf2ff;
+    --muted:#9da8c2;
+    --panel:#0f1420;
+    --line:#263149;
+    --ok:#56d364;
+    --warn:#f2cc60;
+    --err:#ff6b6b;
+    --accent:#4ea1ff;
+    --accent2:#54d2b6;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    color:var(--ink);
+    font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(circle at 15% 10%, #16263d 0%, transparent 45%),
+      radial-gradient(circle at 85% 0%, #17312f 0%, transparent 40%),
+      linear-gradient(180deg, #080d16 0%, #05070b 100%);
+  }
+  .wrap{max-width:1220px;margin:0 auto;padding:14px}
+  .top{
+    display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;
+    margin-bottom:10px;
+  }
+  h1{font-size:20px;margin:0}
+  .badges{display:flex;flex-wrap:wrap;gap:8px}
+  .badge{
+    font-size:12px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);
+    background:#0a1020;display:inline-flex;gap:6px;align-items:center;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:#4b5563}
+  .dot.ok{background:var(--ok)}
+  .dot.err{background:var(--err)}
+  .badge.mode-auto{border-color:#2c8d55;background:#0d2a1a;color:#c8f7d4}
+  .badge.mode-override{border-color:#9f7f2f;background:#2d230d;color:#ffe3a8}
+
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:10px}
+  .card{
+    background:linear-gradient(165deg, rgba(14,20,34,.96), rgba(9,13,24,.96));
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:12px;
+    box-shadow:0 10px 40px rgba(0,0,0,.35);
+  }
+  .c-12{grid-column:span 12}
+  .c-8{grid-column:span 8}
+  .c-6{grid-column:span 6}
+  .c-4{grid-column:span 4}
+  .c-3{grid-column:span 3}
+  h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}
+  .row label{font-size:12px;color:var(--muted);min-width:140px}
+  input,select,button,textarea{
+    font-family:inherit;font-size:13px;
+    background:#080d19;color:var(--ink);border:1px solid #2a3550;border-radius:10px;
+    padding:7px 9px;
+  }
+  input[type=number],input[type=text]{width:140px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  input[type=checkbox]{width:auto}
+  button{cursor:pointer}
+  button:hover{filter:brightness(1.1)}
+  .btn-ok{border-color:#2c8d55;background:#0d2a1a}
+  .btn-warn{border-color:#9f7f2f;background:#2d230d}
+  .btn-danger{border-color:#a54040;background:#2d1111}
+  .btn-blue{border-color:#2f67a8;background:#112741}
+  .muted{font-size:12px;color:var(--muted)}
+  .kpi{
+    display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:8px;
+  }
+  .pill{
+    border:1px solid #2d3956;border-radius:12px;padding:8px;background:#0b1020;
+  }
+  .pill .v{font-size:22px;font-weight:700}
+  .bar{
+    width:100%;height:10px;border-radius:999px;background:#0b1222;border:1px solid #21304a;overflow:hidden;
+  }
+  .fill{
+    height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .16s linear;
+  }
+  .warns{font-size:12px;line-height:1.45}
+  .warn-ok{color:var(--ok)}
+  .warn-warn{color:var(--warn)}
+  .warn-err{color:var(--err)}
+  canvas{display:block;width:100%;height:190px;background:#091022;border:1px solid #23314d;border-radius:10px}
+  .pts-table{width:100%;border-collapse:collapse;margin-top:8px}
+  .pts-table th,.pts-table td{border:1px solid #2a3550;padding:6px;text-align:left;font-size:12px}
+  .pts-table th{color:var(--muted);font-weight:600}
+  .pts-table input{width:90px}
+
+  @media (max-width:1000px){
+    .c-8,.c-6,.c-4,.c-3{grid-column:span 12}
+    .kpi{grid-template-columns:repeat(2,minmax(130px,1fr))}
+    .row label{min-width:120px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Configurador de Acelerador MQTT</h1>
+    <div class="badges">
+      <span class="badge"><span id="mqttDot" class="dot"></span><span id="mqttText">MQTT: desconectado</span></span>
+      <span class="badge">fonte: <b id="srcText">?</b></span>
+      <span class="badge">override: <b id="ovrText">?</b></span>
+      <span class="badge">ultima msg: <b id="lastMsgText">--:--:--</b></span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card c-6">
+      <h2>Conexao MQTT</h2>
+      <div class="row"><label>Host</label><input id="hostIn" type="text" value="broker.mqtt-dashboard.com"/></div>
+      <div class="row"><label>Porta</label><input id="portIn" type="number" value="8000"/><label style="min-width:80px">TLS</label><input id="tlsIn" type="checkbox"/></div>
+      <div class="row"><label>Path WS</label><input id="pathIn" type="text" value="/mqtt"/></div>
+      <div class="row"><label>Client ID base</label><input id="cidIn" type="text" value="ewolf-accelerator-ui"/></div>
+      <div class="row">
+        <button id="btnConnect" class="btn-blue">Conectar</button>
+        <button id="btnDisconnect">Desconectar</button>
+        <button id="btnSaveConn">Salvar</button>
+      </div>
+    </div>
+
+    <div class="card c-6">
+      <h2>Topicos</h2>
+      <div class="row"><label>Telemetria</label><input id="topicTlmIn" type="text" value="pb/telemetry/json"/></div>
+      <div class="row"><label>Config</label><input id="topicCfgIn" type="text" value="pb/cmd/config"/></div>
+      <div class="row"><label>Throttle</label><input id="topicThrIn" type="text" value="pb/cmd/throttle"/></div>
+      <div class="row">
+        <label>Sync campos com telemetria</label>
+        <input id="autoSyncIn" type="checkbox" checked/>
+        <span class="muted">desmarque para editar sem sobrescrever pelos dados ao vivo</span>
+      </div>
+    </div>
+
+    <div class="card c-12">
+      <h2>Sinal Ao Vivo do Acelerador</h2>
+      <div class="kpi">
+        <div class="pill"><div class="muted">Tensao atual</div><div class="v"><span id="voltsNow">--</span> V</div></div>
+        <div class="pill"><div class="muted">Percentual atual</div><div class="v"><span id="pctNow">--</span> %</div></div>
+        <div class="pill"><div class="muted">MIN atual</div><div class="v"><span id="minNow">--</span> V</div></div>
+        <div class="pill"><div class="muted">MAX atual</div><div class="v"><span id="maxNow">--</span> V</div></div>
+      </div>
+      <div class="row"><label>Pedal</label><div class="bar"><div id="barPct" class="fill"></div></div></div>
+      <div class="row"><label>Tensao no range</label><div class="bar"><div id="barVoltRange" class="fill"></div></div></div>
+    </div>
+
+    <div class="card c-8">
+      <h2>Calibracao Principal</h2>
+      <div class="row"><label>min_v (V)</label><input id="minVIn" type="number" step="0.001" min="0.2" max="4.8"/></div>
+      <div class="row"><label>max_v (V)</label><input id="maxVIn" type="number" step="0.001" min="0.4" max="4.95"/></div>
+      <div class="row"><label>max_pct (%)</label><input id="maxPctIn" type="number" step="1" min="1" max="100"/></div>
+      <div class="row"><label>start_min_pct (%)</label><input id="startMinIn" type="number" step="1" min="0" max="40"/></div>
+      <div class="row">
+        <button id="btnUseNowMin">Capturar MIN do valor atual</button>
+        <button id="btnUseNowMax">Capturar MAX do valor atual</button>
+        <button id="btnAutoSpan">Auto span recomendado</button>
+        <button id="btnDefaults" class="btn-warn">Defaults firmware</button>
+      </div>
+      <div class="row">
+        <button id="btnApplyBase" class="btn-ok">Aplicar calibracao</button>
+        <button id="btnApplyAll" class="btn-blue">Aplicar tudo (full patch)</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <h2 style="margin:0">Analise de Seguranca</h2>
+      </div>
+      <div id="warnBox" class="warns"></div>
+      <div class="muted">Dica: deixe o pedal totalmente solto e capture MIN; depois pedal no fim e capture MAX.</div>
+    </div>
+
+    <div class="card c-4">
+      <h2>Teste Sweep (Override)</h2>
+      <div class="row">
+        <label>Modo atual</label>
+        <span id="ctrlModeBadge" class="badge mode-auto">AUTO</span>
+        <span id="ctrlModeHint" class="muted">controle pelo pedal</span>
+      </div>
+      <div class="row"><label>Override manual</label><input id="ovrSlider" type="range" min="0" max="100" value="0"/><b id="ovrVal">0%</b></div>
+      <div class="row">
+        <button id="btnOverrideSend">Enviar override</button>
+        <button id="btnAutoMode">Voltar auto</button>
+      </div>
+      <div class="row">
+        <button id="btnSweepStart" class="btn-warn">Iniciar sweep</button>
+        <button id="btnSweepStop" class="btn-danger">Parar sweep</button>
+      </div>
+      <div class="row">
+        <label>Sweep de</label><input id="swFromIn" type="number" min="0" max="100" value="0"/>
+      </div>
+      <div class="row">
+        <label>ate</label><input id="swToIn" type="number" min="0" max="100" value="60"/>
+      </div>
+      <div class="row">
+        <label>passo</label><input id="swStepIn" type="number" min="1" max="20" value="5"/>
+      </div>
+      <div class="row">
+        <label>intervalo (ms)</label><input id="swIvIn" type="number" min="50" max="3000" value="250"/>
+      </div>
+      <div class="muted">Use para varrer o throttle automaticamente sem mexer na curva custom.</div>
+    </div>
+
+    <div class="card c-6">
+      <h2>Dinamica da Resposta</h2>
+      <div class="row"><label>pwm_hz</label><input id="pwmHzIn" type="number" step="10" min="100" max="8000"/></div>
+      <div class="row"><label>rapid_ms</label><input id="rapidMsIn" type="number" step="10" min="50" max="1500"/></div>
+      <div class="row"><label>rapid_up (%/s)</label><input id="rapidUpIn" type="number" step="1" min="10" max="400"/></div>
+      <div class="row"><label>slew_up (%/s)</label><input id="slewUpIn" type="number" step="1" min="5" max="200"/></div>
+      <div class="row"><label>slew_dn (%/s)</label><input id="slewDnIn" type="number" step="1" min="5" max="300"/></div>
+      <div class="row"><label>zero_timeout_ms</label><input id="zeroToIn" type="number" step="10" min="50" max="2000"/></div>
+      <div class="row"><button id="btnApplyDynamics" class="btn-ok">Aplicar dinamica</button></div>
+    </div>
+
+    <div class="card c-6">
+      <h2>Presets Prontos</h2>
+      <div class="row">
+        <button class="preset btn-blue" data-p="eco">Eco / chuva</button>
+        <button class="preset btn-blue" data-p="urbano">Urbano suave</button>
+        <button class="preset btn-blue" data-p="equilibrado">Equilibrado</button>
+        <button class="preset btn-blue" data-p="esportivo">Esportivo</button>
+        <button class="preset btn-danger" data-p="agressivo">Agressivo pista</button>
+      </div>
+      <div class="muted">Preset preenche os campos e voce escolhe quando aplicar.</div>
+      <div class="row">
+        <button id="btnExport">Exportar perfil JSON</button>
+        <button id="btnImport">Importar perfil JSON</button>
+        <button id="btnSaveLocal">Salvar local</button>
+        <button id="btnLoadLocal">Carregar local</button>
+      </div>
+      <textarea id="profileArea" rows="5" style="width:100%" placeholder='{"min_v":1.10,"max_v":4.25,...}'></textarea>
+    </div>
+
+    <div class="card c-8">
+      <h2>Simulacao de Curva</h2>
+      <canvas id="curveCv"></canvas>
+      <div class="row" style="margin-top:10px">
+        <label>Curva custom (pontos)</label>
+        <input id="customModeIn" type="checkbox"/>
+        <span class="muted">Ativo: mapeia o % de pedal recebido na telemetria para override usando a curva abaixo.</span>
+      </div>
+      <div class="row">
+        <button id="btnPtAdd">Adicionar ponto</button>
+        <button id="btnPtReset">Reset linear</button>
+        <button id="btnPtSort">Ordenar pontos</button>
+        <span class="muted">Saída curva agora: <b id="curveOutNow">--</b>%</span>
+      </div>
+      <table class="pts-table">
+        <thead>
+          <tr><th>#</th><th>Entrada (%)</th><th>Saída (%)</th><th>Ação</th></tr>
+        </thead>
+        <tbody id="ptsBody"></tbody>
+      </table>
+      <div class="muted">A curva é interpolada entre pontos. Exemplo: (20->10), (60->75) deixa início suave e final agressivo.</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const DEFAULT_CFG = {
+  host: "broker.mqtt-dashboard.com",
+  port: 8000,
+  tls: false,
+  path: "/mqtt",
+  cid: "ewolf-accelerator-ui",
+  topicTlm: "pb/telemetry/json",
+  topicCfg: "pb/cmd/config",
+  topicThr: "pb/cmd/throttle"
+};
+const LS_KEY = "ewolf_accel_cfg_v1";
+const LS_PROFILE_KEY = "ewolf_accel_profile_v1";
+const LS_CURVE_KEY = "ewolf_accel_curve_v1";
+
+let cfg = {...DEFAULT_CFG};
+try{
+  const raw = localStorage.getItem(LS_KEY);
+  if (raw) cfg = {...cfg, ...JSON.parse(raw)};
+}catch(_){}
+
+function saveCfg(){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }
+
+const $ = id => document.getElementById(id);
+const mqttDot = $("mqttDot"), mqttText = $("mqttText");
+const srcText = $("srcText"), ovrText = $("ovrText"), lastMsgText = $("lastMsgText");
+const autoSyncIn = $("autoSyncIn");
+const barPct = $("barPct"), barVoltRange = $("barVoltRange");
+const ctrlModeBadge = $("ctrlModeBadge"), ctrlModeHint = $("ctrlModeHint");
+
+const formIds = ["minVIn","maxVIn","maxPctIn","startMinIn","pwmHzIn","rapidMsIn","rapidUpIn","slewUpIn","slewDnIn","zeroToIn"];
+const num = (v, d=0)=> Number.isFinite(Number(v)) ? Number(v) : d;
+const clamp = (v,a,b)=> Math.max(a, Math.min(b, v));
+const f2 = (v,d=2)=> Number.isFinite(v) ? v.toFixed(d) : "--";
+const eq = (a,b,eps=1e-5)=> Math.abs(a-b)<=eps;
+
+let client = null;
+let lastVolts = NaN;
+let live = {
+  min_v: 1.10, max_v: 4.25, max_pct: 100, start_min_pct: 8,
+  pwm_hz: 1000, rapid_ms: 250, rapid_up: 150, slew_up: 40, slew_dn: 60, zero_timeout_ms: 600
+};
+let sweepTimer = null;
+let sweepVal = 0;
+let sweepDir = 1;
+let customCurveEnabled = false;
+let customCurvePoints = [];
+let lastCustomSentMs = 0;
+let lastCustomSentPct = NaN;
+let curveView = null;
+let dragPointIdx = -1;
+
+function setControlMode(mode, hint=""){
+  const isOverride = mode === "override";
+  ctrlModeBadge.textContent = isOverride ? "OVERRIDE" : "AUTO";
+  ctrlModeBadge.classList.remove("mode-auto", "mode-override");
+  ctrlModeBadge.classList.add(isOverride ? "mode-override" : "mode-auto");
+  if (hint) ctrlModeHint.textContent = hint;
+}
+
+function linearCurvePoints(){
+  return [{x:0,y:0},{x:25,y:25},{x:50,y:50},{x:75,y:75},{x:100,y:100}];
+}
+function sanitizeCurvePoints(points){
+  const arr = Array.isArray(points) ? points : [];
+  const out = arr.map(p=>({x: clamp(num(p.x,0),0,100), y: clamp(num(p.y,0),0,100)}))
+    .sort((a,b)=>a.x-b.x);
+  if (!out.length || out[0].x > 0) out.unshift({x:0,y:0});
+  if (out[out.length-1].x < 100) out.push({x:100,y:100});
+  for (let i=1;i<out.length;i++){
+    if (out[i].x < out[i-1].x) out[i].x = out[i-1].x;
+  }
+  return out;
+}
+function saveCurveState(){
+  const st = {enabled: customCurveEnabled, points: customCurvePoints};
+  localStorage.setItem(LS_CURVE_KEY, JSON.stringify(st));
+}
+function loadCurveState(){
+  try{
+    const raw = localStorage.getItem(LS_CURVE_KEY);
+    if (!raw){
+      customCurvePoints = linearCurvePoints();
+      return;
+    }
+    const st = JSON.parse(raw);
+    customCurveEnabled = !!st.enabled;
+    customCurvePoints = sanitizeCurvePoints(st.points);
+  }catch(_){
+    customCurvePoints = linearCurvePoints();
+  }
+}
+function evalCurve(points, x){
+  const p = sanitizeCurvePoints(points);
+  const xv = clamp(num(x,0), 0, 100);
+  if (xv <= p[0].x) return p[0].y;
+  for (let i=1;i<p.length;i++){
+    if (xv <= p[i].x){
+      const a = p[i-1], b = p[i];
+      const dx = Math.max(1e-6, b.x - a.x);
+      const t = (xv - a.x) / dx;
+      return a.y + t * (b.y - a.y);
+    }
+  }
+  return p[p.length-1].y;
+}
+function renderPointsTable(){
+  const body = $("ptsBody");
+  if (!body) return;
+  body.innerHTML = "";
+  customCurvePoints.forEach((pt, idx)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${idx+1}</td>
+      <td><input type="number" min="0" max="100" step="1" data-k="x" data-i="${idx}" value="${Math.round(pt.x)}"></td>
+      <td><input type="number" min="0" max="100" step="1" data-k="y" data-i="${idx}" value="${Math.round(pt.y)}"></td>
+      <td><button data-k="del" data-i="${idx}">Remover</button></td>
+    `;
+    body.appendChild(tr);
+  });
+}
+function bindPointsEvents(){
+  const body = $("ptsBody");
+  if (!body) return;
+  body.addEventListener("input", (ev)=>{
+    const t = ev.target;
+    if (!t || !t.dataset) return;
+    const idx = Number(t.dataset.i);
+    if (!Number.isFinite(idx) || !customCurvePoints[idx]) return;
+    if (t.dataset.k === "x") customCurvePoints[idx].x = clamp(num(t.value, customCurvePoints[idx].x),0,100);
+    if (t.dataset.k === "y") customCurvePoints[idx].y = clamp(num(t.value, customCurvePoints[idx].y),0,100);
+    customCurvePoints = sanitizeCurvePoints(customCurvePoints);
+    renderPointsTable();
+    saveCurveState();
+    drawCurve();
+  });
+  body.addEventListener("click", (ev)=>{
+    const t = ev.target;
+    if (!t || !t.dataset || t.dataset.k !== "del") return;
+    const idx = Number(t.dataset.i);
+    if (!Number.isFinite(idx)) return;
+    if (customCurvePoints.length <= 2) return;
+    customCurvePoints.splice(idx,1);
+    customCurvePoints = sanitizeCurvePoints(customCurvePoints);
+    renderPointsTable();
+    saveCurveState();
+    drawCurve();
+  });
+}
+function applyCustomCurveLive(pedalPct){
+  if (!customCurveEnabled || sweepTimer) return;
+  if (!Number.isFinite(pedalPct)) return;
+  const outPct = clamp(evalCurve(customCurvePoints, pedalPct), 0, 100);
+  $("curveOutNow").textContent = outPct.toFixed(1);
+  const now = Date.now();
+  const delta = Math.abs(outPct - (Number.isFinite(lastCustomSentPct) ? lastCustomSentPct : -999));
+  if ((now - lastCustomSentMs) < 120 && delta < 0.6) return;
+  if (sendOverride(outPct)) {
+    setControlMode("override", `curva custom ${outPct.toFixed(1)}%`);
+    lastCustomSentMs = now;
+    lastCustomSentPct = outPct;
+  }
+}
+
+function setMqtt(state, txt){
+  mqttText.textContent = txt;
+  mqttDot.classList.remove("ok","err");
+  if (state === "ok") mqttDot.classList.add("ok");
+  if (state === "err") mqttDot.classList.add("err");
+}
+
+function publish(topic, payload){
+  if (!client || !client.connected) return false;
+  client.publish(topic, payload, {qos:0, retain:false});
+  return true;
+}
+function sendCfgPatch(p){ return publish(cfg.topicCfg, JSON.stringify(p)); }
+function sendOverride(pct){ return publish(cfg.topicThr, JSON.stringify({mode:"override", pct: clamp(Math.round(pct),0,100)})); }
+function sendAuto(){ return publish(cfg.topicThr, JSON.stringify({mode:"auto"})); }
+
+function connectMqtt(){
+  if (client){ try{client.end(true);}catch(_){} client=null; }
+  const proto = cfg.tls ? "wss" : "ws";
+  const url = `${proto}://${cfg.host}:${cfg.port}${cfg.path}`;
+  setMqtt("err", "MQTT: conectando...");
+  try{
+    client = mqtt.connect(url, {
+      clientId: `${cfg.cid}-${Date.now()}`,
+      clean: true, reconnectPeriod: 1000, keepalive: 10, connectTimeout: 30000
+    });
+  }catch(e){
+    setMqtt("err", "MQTT: erro ao criar cliente");
+    return;
+  }
+  client.on("connect", ()=>{
+    setMqtt("ok", "MQTT: conectado");
+    client.subscribe(cfg.topicTlm, {qos:0});
+  });
+  client.on("close", ()=> setMqtt("err", "MQTT: desconectado"));
+  client.on("reconnect", ()=> setMqtt("err", "MQTT: reconectando..."));
+  client.on("error", ()=> setMqtt("err", "MQTT: erro"));
+  client.on("message", (topic, payload)=>{
+    if (topic !== cfg.topicTlm) return;
+    let d = null;
+    try{ d = JSON.parse(payload.toString()); }catch(_){ return; }
+
+    const volts = num(d.volts, NaN);
+    const pct = num(d.pct, NaN);
+    lastVolts = volts;
+    $("voltsNow").textContent = f2(volts,3);
+    $("pctNow").textContent = f2(pct,1);
+    srcText.textContent = (d.src || "?");
+    const isOverride = (d.override === 1 || d.override === true);
+    ovrText.textContent = isOverride ? `ON (${num(d.override_pct,0).toFixed(0)}%)` : "OFF";
+    setControlMode(
+      isOverride ? "override" : "auto",
+      isOverride ? `telemetria ${num(d.override_pct,0).toFixed(0)}%` : "controle pelo pedal"
+    );
+    lastMsgText.textContent = new Date().toLocaleTimeString();
+
+    if (Number.isFinite(pct)) barPct.style.width = `${clamp(pct,0,100)}%`;
+    if (Number.isFinite(volts) && Number.isFinite(num(d.min,NaN)) && Number.isFinite(num(d.max,NaN))){
+      const rn = (volts - num(d.min)) / Math.max(0.001, (num(d.max)-num(d.min)));
+      barVoltRange.style.width = `${clamp(rn*100,0,100)}%`;
+    }
+
+    if (Number.isFinite(num(d.min,NaN))) live.min_v = num(d.min);
+    if (Number.isFinite(num(d.max,NaN))) live.max_v = num(d.max);
+    if (Number.isFinite(num(d.max_pct,NaN))) live.max_pct = num(d.max_pct);
+    if (Number.isFinite(num(d.start_min_pct,NaN))) live.start_min_pct = num(d.start_min_pct);
+    if (Number.isFinite(num(d.pwm_hz,NaN))) live.pwm_hz = num(d.pwm_hz);
+    if (Number.isFinite(num(d.rapid_ms,NaN))) live.rapid_ms = num(d.rapid_ms);
+    if (Number.isFinite(num(d.rapid_up,NaN))) live.rapid_up = num(d.rapid_up);
+    if (Number.isFinite(num(d.slew_up,NaN))) live.slew_up = num(d.slew_up);
+    if (Number.isFinite(num(d.slew_dn,NaN))) live.slew_dn = num(d.slew_dn);
+    if (Number.isFinite(num(d.zero_timeout_ms,NaN))) live.zero_timeout_ms = num(d.zero_timeout_ms);
+
+    $("minNow").textContent = f2(live.min_v,3);
+    $("maxNow").textContent = f2(live.max_v,3);
+
+    if (autoSyncIn.checked) fillFormFromLive();
+    applyCustomCurveLive(pct);
+    drawCurve();
+    renderWarnings();
+  });
+}
+
+function readForm(){
+  return {
+    min_v: clamp(num($("minVIn").value, live.min_v), 0.2, 4.9),
+    max_v: clamp(num($("maxVIn").value, live.max_v), 0.4, 4.95),
+    max_pct: clamp(num($("maxPctIn").value, live.max_pct), 0, 100),
+    start_min_pct: clamp(num($("startMinIn").value, live.start_min_pct), 0, 40),
+    pwm_hz: clamp(num($("pwmHzIn").value, live.pwm_hz), 100, 8000),
+    rapid_ms: clamp(num($("rapidMsIn").value, live.rapid_ms), 50, 1500),
+    rapid_up: clamp(num($("rapidUpIn").value, live.rapid_up), 10, 400),
+    slew_up: clamp(num($("slewUpIn").value, live.slew_up), 5, 200),
+    slew_dn: clamp(num($("slewDnIn").value, live.slew_dn), 5, 300),
+    zero_timeout_ms: clamp(num($("zeroToIn").value, live.zero_timeout_ms), 50, 2000)
+  };
+}
+
+function diffPatch(form, keys){
+  const p = {};
+  keys.forEach(k=>{ if (!eq(num(form[k]), num(live[k]), 1e-3)) p[k] = form[k]; });
+  return p;
+}
+
+function fillFormFromLive(){
+  $("minVIn").value = live.min_v.toFixed(3);
+  $("maxVIn").value = live.max_v.toFixed(3);
+  $("maxPctIn").value = live.max_pct.toFixed(0);
+  $("startMinIn").value = live.start_min_pct.toFixed(0);
+  $("pwmHzIn").value = live.pwm_hz.toFixed(0);
+  $("rapidMsIn").value = live.rapid_ms.toFixed(0);
+  $("rapidUpIn").value = live.rapid_up.toFixed(0);
+  $("slewUpIn").value = live.slew_up.toFixed(0);
+  $("slewDnIn").value = live.slew_dn.toFixed(0);
+  $("zeroToIn").value = live.zero_timeout_ms.toFixed(0);
+}
+
+function renderWarnings(){
+  const v = readForm();
+  const out = [];
+  if (v.max_v <= v.min_v) out.push(`<div class="warn-err">ERRO: max_v deve ser maior que min_v.</div>`);
+  if (v.max_v - v.min_v < 0.7) out.push(`<div class="warn-warn">Range baixo (${(v.max_v-v.min_v).toFixed(3)}V). Pode ficar nervoso e ruidoso.</div>`);
+  if (v.min_v < 0.7 || v.max_v > 4.7) out.push(`<div class="warn-warn">Faixa fora do comum de acelerador Hall (0.7V-4.7V).</div>`);
+  if (v.max_pct > 95 && v.rapid_up > 250) out.push(`<div class="warn-warn">Modo agressivo: max_pct alto + rapid_up alto.</div>`);
+  if (v.start_min_pct > v.max_pct) out.push(`<div class="warn-err">ERRO: start_min_pct nao pode ser maior que max_pct.</div>`);
+  if (v.slew_dn < v.slew_up * 0.8) out.push(`<div class="warn-warn">Recuo lento: slew_dn baixo pode aumentar distancia de parada.</div>`);
+  if (out.length===0) out.push(`<div class="warn-ok">Configuracao coerente para uso normal.</div>`);
+  $("warnBox").innerHTML = out.join("");
+}
+
+function drawCurve(){
+  const cv = $("curveCv");
+  const ctx = cv.getContext("2d");
+  const w = cv.width = cv.clientWidth;
+  const h = cv.height = cv.clientHeight;
+  const p = readForm();
+  const min = p.min_v, max = Math.max(min + 0.05, p.max_v);
+  const maxPct = clamp(p.max_pct, 0, 100);
+  const startMin = clamp(p.start_min_pct, 0, 40);
+  const padL=44, padB=24, padT=10, padR=10;
+
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = "#091022";
+  ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle = "#20304d";
+  for(let i=0;i<=4;i++){
+    const y = padT + (h-padT-padB)*(i/4);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+  }
+  ctx.strokeStyle="#2d3b58";
+  ctx.strokeRect(padL,padT,w-padL-padR,h-padT-padB);
+
+  ctx.fillStyle="#9da8c2";
+  ctx.font="11px Segoe UI";
+  ctx.fillText("0%", 8, h-padB+4);
+  ctx.fillText("100%", 4, padT+4);
+  ctx.fillText(`${min.toFixed(3)}V`, padL, h-6);
+  ctx.fillText(`${max.toFixed(3)}V`, w-60, h-6);
+
+  function yFromPct(pct){ return padT + (h-padT-padB)*(1 - clamp(pct,0,100)/100); }
+  function xFromV(v){ return padL + (w-padL-padR) * ((v-min)/(max-min)); }
+  function xFromInPct(inPct){
+    const v = min + (max-min) * (clamp(inPct,0,100)/100.0);
+    return xFromV(v);
+  }
+
+  ctx.strokeStyle = "#4ea1ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for(let i=0;i<=140;i++){
+    const v = min + (max-min)*(i/140);
+    let pct = ((v-min)/(max-min))*100;
+    pct = pct * (maxPct/100);
+    if (pct > 0 && pct < startMin) pct = startMin;
+    const x = xFromV(v), y = yFromPct(pct);
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // Curva por pontos (laranja)
+  const pts = sanitizeCurvePoints(customCurvePoints);
+  if (pts.length >= 2){
+    ctx.strokeStyle = customCurveEnabled ? "#f59e0b" : "#c97e15";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((pt, i)=>{
+      const x = xFromInPct(pt.x);
+      const y = yFromPct(clamp(pt.y,0,100));
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = "#f59e0b";
+    pts.forEach((pt)=>{
+      const x = xFromInPct(pt.x);
+      const y = yFromPct(clamp(pt.y,0,100));
+      ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
+    });
+  }
+
+  curveView = {
+    min, max, padL, padR, padT, padB, w, h,
+    xFromInPct, yFromPct,
+    inPctFromX: (xPx)=>{
+      const rx = (xPx - padL) / Math.max(1, (w-padL-padR));
+      return clamp(rx*100.0, 0, 100);
+    },
+    outPctFromY: (yPx)=>{
+      const ry = (yPx - padT) / Math.max(1, (h-padT-padB));
+      return clamp((1-ry)*100.0, 0, 100);
+    }
+  };
+
+  if (Number.isFinite(lastVolts)){
+    let pp = ((lastVolts-min)/(max-min))*100;
+    pp = clamp(pp, 0, 100) * (maxPct/100);
+    if (pp > 0 && pp < startMin) pp = startMin;
+    ctx.fillStyle="#54d2b6";
+    const x = xFromV(clamp(lastVolts,min,max));
+    const y = yFromPct(pp);
+    ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill();
+  }
+}
+
+function getCanvasPos(ev){
+  const cv = $("curveCv");
+  const r = cv.getBoundingClientRect();
+  const src = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
+  return { x: src.clientX - r.left, y: src.clientY - r.top };
+}
+
+function findPointAt(x, y){
+  if (!curveView) return -1;
+  let best = -1;
+  let bestD = 9999;
+  customCurvePoints.forEach((pt, i)=>{
+    const px = curveView.xFromInPct(pt.x);
+    const py = curveView.yFromPct(pt.y);
+    const d = Math.hypot(px-x, py-y);
+    if (d < bestD){
+      bestD = d;
+      best = i;
+    }
+  });
+  return bestD <= 12 ? best : -1;
+}
+
+function updateDraggedPoint(x, y){
+  if (dragPointIdx < 0 || !curveView) return;
+  const p = customCurvePoints[dragPointIdx];
+  if (!p) return;
+  const newY = curveView.outPctFromY(y);
+  let newX = curveView.inPctFromX(x);
+  const isEndpoint = (dragPointIdx === 0 || dragPointIdx === customCurvePoints.length-1);
+  if (isEndpoint) newX = (dragPointIdx === 0) ? 0 : 100;
+  p.x = newX;
+  p.y = newY;
+  customCurvePoints = sanitizeCurvePoints(customCurvePoints);
+  renderPointsTable();
+  saveCurveState();
+  drawCurve();
+}
+
+function loadUiFromCfg(){
+  $("hostIn").value = cfg.host;
+  $("portIn").value = cfg.port;
+  $("tlsIn").checked = !!cfg.tls;
+  $("pathIn").value = cfg.path;
+  $("cidIn").value = cfg.cid;
+  $("topicTlmIn").value = cfg.topicTlm;
+  $("topicCfgIn").value = cfg.topicCfg;
+  $("topicThrIn").value = cfg.topicThr;
+}
+function storeUiToCfg(){
+  cfg.host = $("hostIn").value.trim() || DEFAULT_CFG.host;
+  cfg.port = clamp(num($("portIn").value, DEFAULT_CFG.port), 1, 65535);
+  cfg.tls = $("tlsIn").checked;
+  cfg.path = $("pathIn").value.trim() || DEFAULT_CFG.path;
+  cfg.cid = $("cidIn").value.trim() || DEFAULT_CFG.cid;
+  cfg.topicTlm = $("topicTlmIn").value.trim() || DEFAULT_CFG.topicTlm;
+  cfg.topicCfg = $("topicCfgIn").value.trim() || DEFAULT_CFG.topicCfg;
+  cfg.topicThr = $("topicThrIn").value.trim() || DEFAULT_CFG.topicThr;
+}
+
+$("btnSaveConn").onclick = ()=>{ storeUiToCfg(); saveCfg(); };
+$("btnConnect").onclick = ()=>{ storeUiToCfg(); saveCfg(); connectMqtt(); };
+$("btnDisconnect").onclick = ()=>{ if(client){ client.end(true); client=null; } setMqtt("err","MQTT: desconectado"); };
+
+$("btnUseNowMin").onclick = ()=>{ if (Number.isFinite(lastVolts)) $("minVIn").value = lastVolts.toFixed(3); renderWarnings(); drawCurve(); };
+$("btnUseNowMax").onclick = ()=>{ if (Number.isFinite(lastVolts)) $("maxVIn").value = lastVolts.toFixed(3); renderWarnings(); drawCurve(); };
+$("btnAutoSpan").onclick = ()=>{
+  if (!Number.isFinite(lastVolts)) return;
+  $("minVIn").value = clamp(lastVolts - 0.20, 0.4, 4.7).toFixed(3);
+  $("maxVIn").value = clamp(lastVolts + 3.00, 1.2, 4.9).toFixed(3);
+  renderWarnings(); drawCurve();
+};
+$("btnDefaults").onclick = ()=>{
+  $("minVIn").value = "1.100";
+  $("maxVIn").value = "4.250";
+  $("maxPctIn").value = "100";
+  $("startMinIn").value = "8";
+  $("pwmHzIn").value = "1000";
+  $("rapidMsIn").value = "250";
+  $("rapidUpIn").value = "150";
+  $("slewUpIn").value = "40";
+  $("slewDnIn").value = "60";
+  $("zeroToIn").value = "600";
+  renderWarnings(); drawCurve();
+};
+
+$("btnApplyBase").onclick = ()=>{
+  const f = readForm();
+  const patch = diffPatch(f, ["min_v","max_v","max_pct","start_min_pct"]);
+  if (Object.keys(patch).length) sendCfgPatch(patch);
+};
+$("btnApplyDynamics").onclick = ()=>{
+  const f = readForm();
+  const patch = diffPatch(f, ["pwm_hz","rapid_ms","rapid_up","slew_up","slew_dn","zero_timeout_ms"]);
+  if (Object.keys(patch).length) sendCfgPatch(patch);
+};
+$("btnApplyAll").onclick = ()=> sendCfgPatch(readForm());
+
+const presets = {
+  eco:        {max_pct:55, start_min_pct:8, rapid_ms:380, rapid_up:70,  slew_up:22, slew_dn:52, pwm_hz:1200, zero_timeout_ms:800},
+  urbano:     {max_pct:75, start_min_pct:8, rapid_ms:320, rapid_up:110, slew_up:30, slew_dn:58, pwm_hz:1000, zero_timeout_ms:700},
+  equilibrado:{max_pct:90, start_min_pct:8, rapid_ms:250, rapid_up:150, slew_up:40, slew_dn:60, pwm_hz:1000, zero_timeout_ms:600},
+  esportivo:  {max_pct:100,start_min_pct:10,rapid_ms:170, rapid_up:220, slew_up:65, slew_dn:90, pwm_hz:1400, zero_timeout_ms:500},
+  agressivo:  {max_pct:100,start_min_pct:12,rapid_ms:90,  rapid_up:320, slew_up:95, slew_dn:130,pwm_hz:1800, zero_timeout_ms:350}
+};
+document.querySelectorAll(".preset").forEach(b=>{
+  b.onclick = ()=>{
+    const p = presets[b.dataset.p];
+    Object.keys(p).forEach(k=>{
+      const map = {
+        max_pct:"maxPctIn", start_min_pct:"startMinIn", rapid_ms:"rapidMsIn", rapid_up:"rapidUpIn",
+        slew_up:"slewUpIn", slew_dn:"slewDnIn", pwm_hz:"pwmHzIn", zero_timeout_ms:"zeroToIn"
+      };
+      if (map[k]) $(map[k]).value = String(p[k]);
+    });
+    renderWarnings(); drawCurve();
+  };
+});
+
+$("ovrSlider").oninput = ()=> $("ovrVal").textContent = `${$("ovrSlider").value}%`;
+$("btnOverrideSend").onclick = ()=>{
+  const pct = num($("ovrSlider").value,0);
+  if (sendOverride(pct)) setControlMode("override", `manual ${clamp(Math.round(pct),0,100)}%`);
+};
+$("btnAutoMode").onclick = ()=>{
+  if (sendAuto()) setControlMode("auto", "aguardando telemetria");
+};
+
+function stopSweep(){ if (sweepTimer){ clearInterval(sweepTimer); sweepTimer = null; } }
+$("btnSweepStop").onclick = stopSweep;
+$("btnSweepStart").onclick = ()=>{
+  stopSweep();
+  const a = clamp(num($("swFromIn").value,0),0,100);
+  const b = clamp(num($("swToIn").value,60),0,100);
+  const step = Math.max(1, clamp(num($("swStepIn").value,5),1,20));
+  const iv = clamp(num($("swIvIn").value,250),50,3000);
+  sweepVal = a;
+  sweepDir = (b >= a) ? 1 : -1;
+  if (sendOverride(sweepVal)) setControlMode("override", `sweep ${Math.round(sweepVal)}%`);
+  sweepTimer = setInterval(()=>{
+    const next = sweepVal + sweepDir * step;
+    const reachedEnd = (sweepDir > 0 && next >= b) || (sweepDir < 0 && next <= b);
+    sweepVal = reachedEnd ? b : clamp(next, Math.min(a,b), Math.max(a,b));
+    $("ovrSlider").value = String(sweepVal);
+    $("ovrVal").textContent = `${sweepVal}%`;
+    if (sendOverride(sweepVal)) setControlMode("override", `sweep ${Math.round(sweepVal)}%`);
+    if (reachedEnd) stopSweep();
+  }, iv);
+};
+
+$("btnPtAdd").onclick = ()=>{
+  customCurvePoints.push({x:50,y:50});
+  customCurvePoints = sanitizeCurvePoints(customCurvePoints);
+  renderPointsTable();
+  saveCurveState();
+  drawCurve();
+};
+$("btnPtReset").onclick = ()=>{
+  customCurvePoints = linearCurvePoints();
+  renderPointsTable();
+  saveCurveState();
+  drawCurve();
+};
+$("btnPtSort").onclick = ()=>{
+  customCurvePoints = sanitizeCurvePoints(customCurvePoints);
+  renderPointsTable();
+  saveCurveState();
+  drawCurve();
+};
+$("customModeIn").onchange = ()=>{
+  customCurveEnabled = $("customModeIn").checked;
+  saveCurveState();
+  if (!customCurveEnabled && sendAuto()) setControlMode("auto", "curva custom desativada");
+  drawCurve();
+};
+
+$("btnSaveLocal").onclick = ()=> {
+  localStorage.setItem(LS_PROFILE_KEY, JSON.stringify({
+    ...readForm(),
+    curve_points: customCurvePoints,
+    curve_enabled: customCurveEnabled
+  }));
+};
+$("btnLoadLocal").onclick = ()=>{
+  try{
+    const raw = localStorage.getItem(LS_PROFILE_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    Object.entries(p).forEach(([k,v])=>{
+      const map = {
+        min_v:"minVIn",max_v:"maxVIn",max_pct:"maxPctIn",start_min_pct:"startMinIn",pwm_hz:"pwmHzIn",
+        rapid_ms:"rapidMsIn",rapid_up:"rapidUpIn",slew_up:"slewUpIn",slew_dn:"slewDnIn",zero_timeout_ms:"zeroToIn"
+      };
+      if (map[k]) $(map[k]).value = String(v);
+    });
+    if (Array.isArray(p.curve_points)) customCurvePoints = sanitizeCurvePoints(p.curve_points);
+    if (typeof p.curve_enabled !== "undefined") customCurveEnabled = !!p.curve_enabled;
+    $("customModeIn").checked = customCurveEnabled;
+    renderPointsTable();
+    saveCurveState();
+    renderWarnings(); drawCurve();
+  }catch(_){}
+};
+$("btnExport").onclick = ()=> $("profileArea").value = JSON.stringify({
+  ...readForm(),
+  curve_points: customCurvePoints,
+  curve_enabled: customCurveEnabled
+}, null, 2);
+$("btnImport").onclick = ()=>{
+  try{
+    const p = JSON.parse($("profileArea").value);
+    const m = {min_v:"minVIn",max_v:"maxVIn",max_pct:"maxPctIn",start_min_pct:"startMinIn",pwm_hz:"pwmHzIn",rapid_ms:"rapidMsIn",rapid_up:"rapidUpIn",slew_up:"slewUpIn",slew_dn:"slewDnIn",zero_timeout_ms:"zeroToIn"};
+    Object.keys(m).forEach(k=>{ if (typeof p[k] !== "undefined") $(m[k]).value = String(p[k]); });
+    if (Array.isArray(p.curve_points)) customCurvePoints = sanitizeCurvePoints(p.curve_points);
+    if (typeof p.curve_enabled !== "undefined") customCurveEnabled = !!p.curve_enabled;
+    $("customModeIn").checked = customCurveEnabled;
+    renderPointsTable();
+    saveCurveState();
+    renderWarnings(); drawCurve();
+  }catch(_){}
+};
+
+formIds.forEach(id=>{
+  $(id).addEventListener("input", ()=>{ renderWarnings(); drawCurve(); });
+});
+
+const curveCv = $("curveCv");
+curveCv.addEventListener("mousedown", (ev)=>{
+  const p = getCanvasPos(ev);
+  dragPointIdx = findPointAt(p.x, p.y);
+  if (dragPointIdx >= 0) ev.preventDefault();
+});
+curveCv.addEventListener("mousemove", (ev)=>{
+  if (dragPointIdx < 0) return;
+  const p = getCanvasPos(ev);
+  updateDraggedPoint(p.x, p.y);
+});
+window.addEventListener("mouseup", ()=>{ dragPointIdx = -1; });
+curveCv.addEventListener("touchstart", (ev)=>{
+  const p = getCanvasPos(ev);
+  dragPointIdx = findPointAt(p.x, p.y);
+  if (dragPointIdx >= 0) ev.preventDefault();
+}, {passive:false});
+curveCv.addEventListener("touchmove", (ev)=>{
+  if (dragPointIdx < 0) return;
+  const p = getCanvasPos(ev);
+  updateDraggedPoint(p.x, p.y);
+  ev.preventDefault();
+}, {passive:false});
+window.addEventListener("touchend", ()=>{ dragPointIdx = -1; });
+
+loadUiFromCfg();
+loadCurveState();
+fillFormFromLive();
+$("customModeIn").checked = customCurveEnabled;
+renderPointsTable();
+bindPointsEvents();
+renderWarnings();
+drawCurve();
+setControlMode("auto", "controle pelo pedal");
+connectMqtt();
+</script>
+</body>
+</html>
