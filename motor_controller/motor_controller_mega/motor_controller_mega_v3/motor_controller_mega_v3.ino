@@ -33,7 +33,7 @@ static const bool USE_CURR_DERATE  = false;
 static const bool USE_STALL_DETECT = false;
 
 // ---------- Pinos principais ----------
-const uint8_t PIN_THROTTLE = A0;
+const uint8_t PIN_THROTTLE = A1;   // Antigo A0, pois A0 queimou
 const uint8_t PIN_RPM      = A8;   // tem PCINT no MEGA (PORTK)
 const uint8_t PIN_IBAT     = A2;
 const uint8_t PIN_IMOT     = A3;
@@ -60,13 +60,24 @@ bool rtc_ok = false;
 DHT dht(PIN_DHT, DHTTYPE);
 
 // ---------- PWM ----------
-uint16_t PWM_FREQ_HZ   = 1000; // 100..8000
+const uint16_t DEFAULT_PWM_FREQ_HZ      = 1000;
+const uint16_t DEFAULT_RAPID_RAMP_MS    = 250;
+const float    DEFAULT_RAPID_UP_PCTPS   = 150.0f;
+const float    DEFAULT_SLEW_UP_PCTPS    = 40.0f;
+const float    DEFAULT_SLEW_DN_PCTPS    = 60.0f;
+const uint8_t  DEFAULT_START_MIN_PCT    = 8;
+const uint8_t  DEFAULT_G_MAX_PCT        = 100;
+const float    DEFAULT_V_MIN_REAL       = 1.10f;
+const float    DEFAULT_V_MAX_REAL       = 4.25f;
+const uint8_t  CFG_VERSION              = 3;
+
+uint16_t PWM_FREQ_HZ   = DEFAULT_PWM_FREQ_HZ; // 100..8000
 
 // ---------- Acelerador ----------
 const float VREF_ADC = 5.0f;
 const int   ADC_MAX  = 1023;
-float V_MIN_REAL = 1.10f;
-float V_MAX_REAL = 4.25f;
+float V_MIN_REAL = DEFAULT_V_MIN_REAL;
+float V_MAX_REAL = DEFAULT_V_MAX_REAL;
 const float V_FAULT_LOW  = 0.30f;
 const float V_FAULT_HIGH = 4.90f;
 
@@ -81,11 +92,11 @@ float dutyNowPct = 0.0f;
 float dutyTargetPct = 0.0f;
 unsigned long rapidUntilMs = 0;
 
-uint16_t RAPID_RAMP_MS = 250;
-float    RAPID_UP_PCTPS= 150;
-float    SLEW_UP_PCTPS = 40;
-float    SLEW_DN_PCTPS = 60;
-uint8_t  START_MIN_PCT = 8;
+uint16_t RAPID_RAMP_MS = DEFAULT_RAPID_RAMP_MS;
+float    RAPID_UP_PCTPS= DEFAULT_RAPID_UP_PCTPS;
+float    SLEW_UP_PCTPS = DEFAULT_SLEW_UP_PCTPS;
+float    SLEW_DN_PCTPS = DEFAULT_SLEW_DN_PCTPS;
+uint8_t  START_MIN_PCT = DEFAULT_START_MIN_PCT;
 
 const uint8_t  DEADZONE_PWM        = 4;
 const uint8_t  MIN_START_PWM       = 20;
@@ -149,11 +160,12 @@ bool    g_accelS_on = true;
 uint16_t g_ramp_delay_ms = 0;
 
 // ---------- Teto de aceleração ----------
-uint8_t G_MAX_PCT = 100;
+uint8_t G_MAX_PCT = DEFAULT_G_MAX_PCT;
 
 // ---------- Persistência (EEPROM) ----------
 struct Cfg {
-  uint8_t ver;      // = 2
+  uint8_t ver;      // = CFG_VERSION
+  uint32_t fw_sig;  // assinatura da compilação (muda a cada upload)
   float vmin, vmax;
   uint8_t maxpct;
   uint16_t pwm_hz;
@@ -163,8 +175,32 @@ struct Cfg {
   uint8_t  start_min;
 } cfg;
 
+uint32_t build_signature(){
+  // FNV-1a de __DATE__ + __TIME__: muda entre compilações.
+  const char* a = __DATE__;
+  const char* b = __TIME__;
+  uint32_t h = 2166136261UL;
+  while (*a){ h ^= (uint8_t)*a++; h *= 16777619UL; }
+  h ^= (uint8_t)'|'; h *= 16777619UL;
+  while (*b){ h ^= (uint8_t)*b++; h *= 16777619UL; }
+  return h;
+}
+
+void apply_manual_defaults(){
+  V_MIN_REAL=DEFAULT_V_MIN_REAL;
+  V_MAX_REAL=DEFAULT_V_MAX_REAL;
+  G_MAX_PCT=DEFAULT_G_MAX_PCT;
+  PWM_FREQ_HZ=DEFAULT_PWM_FREQ_HZ;
+  RAPID_RAMP_MS=DEFAULT_RAPID_RAMP_MS;
+  RAPID_UP_PCTPS=DEFAULT_RAPID_UP_PCTPS;
+  SLEW_UP_PCTPS=DEFAULT_SLEW_UP_PCTPS;
+  SLEW_DN_PCTPS=DEFAULT_SLEW_DN_PCTPS;
+  START_MIN_PCT=DEFAULT_START_MIN_PCT;
+}
+
 void saveCfg(){
-  cfg.ver=2;
+  cfg.ver=CFG_VERSION;
+  cfg.fw_sig=build_signature();
   cfg.vmin=V_MIN_REAL; cfg.vmax=V_MAX_REAL;
   cfg.maxpct=G_MAX_PCT;
   cfg.pwm_hz=PWM_FREQ_HZ;
@@ -176,7 +212,8 @@ void saveCfg(){
 
 bool loadCfg(){
   EEPROM.get(0, cfg);
-  if (cfg.ver!=2) return false;
+  if (cfg.ver!=CFG_VERSION) return false;
+  if (cfg.fw_sig!=build_signature()) return false;
   V_MIN_REAL=cfg.vmin; V_MAX_REAL=cfg.vmax;
   G_MAX_PCT=cfg.maxpct;
   PWM_FREQ_HZ=cfg.pwm_hz;
@@ -357,8 +394,8 @@ void process_line(String line){
   if (head=="SET_MIN_NOW"){ V_MIN_REAL=g_volts; ack("SET_MIN_NOW",String(V_MIN_REAL,3)); return; }
   if (head=="SET_MAX_NOW"){ V_MAX_REAL=g_volts; ack("SET_MAX_NOW",String(V_MAX_REAL,3)); return; }
   if (head=="DEFAULTS"){
-    V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; pwm1_set_freq(1000);
-    RAPID_RAMP_MS=250; RAPID_UP_PCTPS=150; SLEW_UP_PCTPS=40; SLEW_DN_PCTPS=60; START_MIN_PCT=8;
+    apply_manual_defaults();
+    pwm1_set_freq(PWM_FREQ_HZ);
     ack("DEFAULTS","OK"); return;
   }
 
@@ -383,8 +420,8 @@ void process_line(String line){
   // persistência
   if (head=="SAVE"){ saveCfg(); ack("SAVE","OK"); return; }
   if (head=="LOAD_DEFAULTS"){
-    V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; pwm1_set_freq(1000);
-    RAPID_RAMP_MS=250; RAPID_UP_PCTPS=150; SLEW_UP_PCTPS=40; SLEW_DN_PCTPS=60; START_MIN_PCT=8;
+    apply_manual_defaults();
+    pwm1_set_freq(PWM_FREQ_HZ);
     ack("LOAD_DEFAULTS","OK"); return;
   }
 
@@ -431,8 +468,7 @@ void setup(){
 
   // EEPROM
   if (!loadCfg()){
-    V_MIN_REAL=0.80f; V_MAX_REAL=4.20f; G_MAX_PCT=100; PWM_FREQ_HZ=1000;
-    RAPID_RAMP_MS=250; RAPID_UP_PCTPS=150; SLEW_UP_PCTPS=40; SLEW_DN_PCTPS=60; START_MIN_PCT=8;
+    apply_manual_defaults();
     saveCfg();
   }
 
