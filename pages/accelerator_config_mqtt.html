@@ -100,6 +100,17 @@
   .pts-table th{color:var(--muted);font-weight:600}
   .pts-table input{width:90px}
 
+  #toastBox{
+    position:fixed;bottom:14px;left:50%;transform:translateX(-50%);
+    z-index:999;display:flex;flex-direction:column;gap:6px;align-items:center;
+  }
+  .toast{
+    background:#2d1111;border:1px solid #a54040;color:#ffd7d7;
+    padding:8px 14px;border-radius:10px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.4);
+    animation:toastIn .15s ease-out;
+  }
+  @keyframes toastIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
   @media (max-width:1000px){
     .c-8,.c-6,.c-4,.c-3{grid-column:span 12}
     .kpi{grid-template-columns:repeat(2,minmax(130px,1fr))}
@@ -108,6 +119,7 @@
 </style>
 </head>
 <body>
+<div id="toastBox"></div>
 <div class="wrap">
   <div class="top">
     <h1>Configurador de Acelerador MQTT</h1>
@@ -431,6 +443,16 @@ function applyCustomCurveLive(pedalPct){
   }
 }
 
+function showToast(msg){
+  const box = $("toastBox");
+  if (!box) return;
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(()=> el.remove(), 3200);
+}
+
 function setMqtt(state, txt){
   mqttText.textContent = txt;
   mqttDot.classList.remove("ok","err");
@@ -439,8 +461,11 @@ function setMqtt(state, txt){
 }
 
 function publish(topic, payload){
-  if (!client || !client.connected) return false;
-  client.publish(topic, payload, {qos:0, retain:false});
+  if (!client || !client.connected){
+    showToast("MQTT desconectado — comando NAO enviado");
+    return false;
+  }
+  client.publish(topic, payload, {qos:1, retain:false});
   return true;
 }
 function sendCfgPatch(p){ return publish(cfg.topicCfg, JSON.stringify(p)); }
