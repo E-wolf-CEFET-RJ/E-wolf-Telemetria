@@ -465,7 +465,7 @@ function publish(topic, payload){
     showToast("MQTT desconectado — comando NAO enviado");
     return false;
   }
-  client.publish(topic, payload, {qos:0, retain:false});
+  client.publish(topic, payload, {qos:1, retain:false});
   return true;
 }
 function sendCfgPatch(p){ return publish(cfg.topicCfg, JSON.stringify(p)); }
